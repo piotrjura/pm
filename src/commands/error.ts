@@ -1,0 +1,22 @@
+import { markTaskError } from '../lib/store.js'
+import { updateClaudeMd } from '../lib/claude-md.js'
+import { parseFlag } from '../lib/args.js'
+
+export function cmdError(args: string[]) {
+  const taskId = args[0]
+  if (!taskId) {
+    console.error('Usage: pm error <taskId> [--agent <name>] [--note "reason"]')
+    process.exit(1)
+  }
+
+  const agent = parseFlag(args, '--agent')
+  const note = parseFlag(args, '--note')
+
+  markTaskError(taskId, agent, note)
+  updateClaudeMd()
+
+  console.log(`Error: task ${taskId}`)
+  if (note) console.log(`Note : ${note}`)
+  console.log()
+  console.log(`Retry with: pm retry ${taskId}${note ? ` --note '${note}'` : ''}`)
+}

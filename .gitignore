@@ -1,0 +1,7 @@
+node_modules
+dist
+.pm
+.agents
+.claude
+symphony-main
+skills-lock.json
