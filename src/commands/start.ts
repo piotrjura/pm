@@ -1,5 +1,4 @@
 import { markTaskStarted } from '../lib/store.js'
-import { updateClaudeMd } from '../lib/claude-md.js'
 import { parseFlag } from '../lib/args.js'
 
 export function cmdStart(args: string[]) {
@@ -16,8 +15,6 @@ export function cmdStart(args: string[]) {
     console.error(`Task not found: ${taskId}`)
     process.exit(1)
   }
-
-  updateClaudeMd()
 
   console.log(`Started: ${result.task.title}`)
   if (agent) console.log(`Agent  : ${agent}`)

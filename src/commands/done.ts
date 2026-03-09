@@ -1,5 +1,4 @@
 import { markTaskDone, updateIssue, loadStore } from '../lib/store.js'
-import { updateClaudeMd } from '../lib/claude-md.js'
 import { parseFlag, hasFlag } from '../lib/args.js'
 
 export function cmdDone(args: string[]) {
@@ -18,15 +17,13 @@ export function cmdDone(args: string[]) {
   const issue = store.issues.find(i => i.id === issueId)
   if (issue) {
     updateIssue(issueId, { status: 'done' })
-    updateClaudeMd()
+
     console.log(`Done: issue ${id}`)
     if (note) console.log(`Note : ${note}`)
     return
   }
 
   const nextTask = markTaskDone(id, agent, note, forceReview)
-
-  updateClaudeMd()
 
   if (forceReview) {
     console.log(`Submitted for review: task ${id}`)

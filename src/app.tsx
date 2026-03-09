@@ -5,11 +5,13 @@ import { UnifiedList } from './components/unified-list.js'
 import { FeatureDetail } from './components/feature-detail.js'
 import { IssueDetail } from './components/issue-detail.js'
 import { InitScreen } from './components/init-screen.js'
+import { UpgradeScreen } from './components/upgrade-screen.js'
 import { useNavigation } from './hooks/use-navigation.js'
 import { useStore } from './hooks/use-store.js'
-import { detectProjectStatus, isInitialized, ensureClaudePermission } from './lib/init.js'
+import { detectProjectStatus, isInitialized, ensureClaudePermission, detectUpgrade } from './lib/init.js'
+import type { UpgradeInfo } from './lib/init.js'
 import { loadStore } from './lib/store.js'
-import { updateClaudeMd } from './lib/claude-md.js'
+import { ensureHooks } from './lib/hooks.js'
 
 export function App() {
   const { exit } = useApp()
@@ -26,18 +28,27 @@ export function App() {
 
   const [initialized, setInitialized] = useState(() => isInitialized())
   const [projectStatus] = useState(() => detectProjectStatus())
+  const [upgradeInfo, setUpgradeInfo] = useState<UpgradeInfo | null>(() => {
+    if (!isInitialized()) return null
+    const upgrade = detectUpgrade()
+    if (!upgrade) return null
+    // Perform the upgrade immediately
+    const cwd = process.cwd()
+    const hookResult = ensureHooks(cwd)
+    const updatedHooks = hookResult !== 'exists'
+    // loadStore will stamp the new version
+    loadStore()
+    return { ...upgrade, updatedHooks }
+  })
 
   const nav = useNavigation()
   const store = useStore()
 
-  useEffect(() => {
-    if (initialized) updateClaudeMd()
-  }, [initialized])
-
   const handleInit = useCallback(() => {
+    const cwd = process.cwd()
     loadStore()
-    updateClaudeMd()
     ensureClaudePermission()
+    ensureHooks(cwd)
     setInitialized(true)
     store.refresh()
   }, [store])
@@ -53,6 +64,16 @@ export function App() {
       <InitScreen
         status={projectStatus}
         onConfirm={handleInit}
+        onQuit={() => exit()}
+      />
+    )
+  }
+
+  if (upgradeInfo) {
+    return (
+      <UpgradeScreen
+        info={upgradeInfo}
+        onContinue={() => { setUpgradeInfo(null); store.refresh() }}
         onQuit={() => exit()}
       />
     )

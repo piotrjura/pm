@@ -15,13 +15,19 @@ export function cmdShow(args: string[]) {
     process.exit(1)
   }
 
-  const doneIds = new Set<string>()
-  for (const phase of feature.phases)
-    for (const task of phase.tasks)
-      if (task.status === 'done') doneIds.add(task.id)
-
   console.log(`[${feature.status.toUpperCase()}] ${feature.title}  [feature:${feature.id}]`)
   if (feature.description) console.log(`  ${feature.description}`)
+
+  // Feature-level decisions
+  if (feature.decisions?.length) {
+    console.log()
+    console.log('  Decisions:')
+    for (const d of feature.decisions) {
+      console.log(`    • ${d.decision}`)
+      if (d.reasoning) console.log(`      Why: ${d.reasoning}`)
+    }
+  }
+
   console.log()
 
   if (feature.phases.length === 0) {
@@ -36,14 +42,18 @@ export function cmdShow(args: string[]) {
       const icon = STATUS_ICON[task.status] ?? '?'
       const meta: string[] = []
       if (task.priority !== undefined && task.priority !== 3) meta.push(`P${task.priority}`)
-      const unsatisfied = (task.dependsOn ?? []).filter(id => !doneIds.has(id))
-      if (unsatisfied.length > 0) meta.push('[blocked]')
       if ((task.attempt ?? 0) > 0) meta.push(`attempt ${task.attempt}`)
       if (task.doneAt) meta.push(`done ${task.doneAt.slice(0, 10)}`)
       const metaStr = meta.length > 0 ? `  ${meta.join(' ')}` : ''
       console.log(`    ${icon} ${task.title}  [task:${task.id}]${metaStr}`)
       if (task.description) console.log(`       desc: ${task.description}`)
       if (task.note) console.log(`       note: ${task.note}`)
+      if (task.decisions?.length) {
+        for (const d of task.decisions) {
+          console.log(`       decision: ${d.decision}`)
+          if (d.reasoning) console.log(`         why: ${d.reasoning}`)
+        }
+      }
       if (task.files?.length) console.log(`       files: ${task.files.join(', ')}`)
     }
     console.log()

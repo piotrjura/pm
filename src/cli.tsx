@@ -16,18 +16,27 @@ import { cmdAddTask } from './commands/add-task.js'
 import { cmdAddIssue } from './commands/add-issue.js'
 import { cmdShow } from './commands/show.js'
 import { cmdUpdate } from './commands/update.js'
-import { ensureInstructionsUpToDate } from './lib/claude-md.js'
+import { cmdDecide } from './commands/decide.js'
+import { cmdRecap } from './commands/recap.js'
+import { cmdHook } from './commands/hook.js'
+import { cmdWhy } from './commands/why.js'
+import { cmdCleanup } from './commands/cleanup.js'
 
 const [,, subcommand, ...rest] = process.argv
 
-// Auto-update CLAUDE.md instructions if pm version changed
-if (subcommand !== 'init' && subcommand !== 'help' && subcommand !== '--help' && subcommand !== '-h') {
-  ensureInstructionsUpToDate()
+async function launchTUI() {
+  const app = withFullScreen(<App />)
+  await app.start()
+  await app.waitUntilExit()
 }
 
 switch (subcommand) {
   case 'init':
     await cmdInit()
+    // After interactive init, launch the TUI if the wizard completed successfully
+    if (process.stdin.isTTY && process.exitCode !== 1) {
+      await launchTUI()
+    }
     break
   case 'next':
     cmdNext()
@@ -72,6 +81,21 @@ switch (subcommand) {
   case 'update':
     cmdUpdate(rest)
     break
+  case 'decide':
+    cmdDecide(rest)
+    break
+  case 'recap':
+    cmdRecap(rest)
+    break
+  case 'hook':
+    cmdHook(rest)
+    break
+  case 'why':
+    cmdWhy(rest)
+    break
+  case 'cleanup':
+    cmdCleanup(rest)
+    break
   case 'help':
   case '--help':
   case '-h':
@@ -79,8 +103,8 @@ switch (subcommand) {
 
 Commands:
   pm              Open TUI
-  pm init         Initialize pm in this directory (writes instructions to CLAUDE.md)
-  pm next         Show next pending task (updates CLAUDE.md)
+  pm init         Initialize pm in this directory
+  pm next         Show next pending task
   pm start <id>   Mark task as in-progress [--agent <name>]
   pm done <id>    Mark task as done [--agent <name>] [--note "..."]
   pm list         List all features and tasks
@@ -92,15 +116,17 @@ Commands:
 Track work:
   pm add-feature <title> [--description "..."]
   pm add-phase <featureId> <title>
-  pm add-task <featureId> <phaseId> <title> [--description "..."] [--files "a,b"] [--priority 1-5] [--depends-on "id1,id2"]
+  pm add-task <featureId> <phaseId> <title> [--description "..."] [--files "a,b"] [--priority 1-5]
   pm add-issue <title>   [--type bug|change] [--priority urgent|high|medium|low] [--description "..."]
+  pm decide <id> "decision" [--reasoning "why, trade-offs"]
+  pm why <search>        Search all decisions — find out why something was built a certain way
+  pm cleanup             Reset stuck tasks [--errors] [--drafts] [--all] [--quiet]
+  pm recap               Briefing: active work, recent decisions, next steps
   pm update <id>         Update issue/feature [--priority urgent|high|medium|low] [--title "..."] [--description "..."]
   pm show <featureId>    Feature detail with all IDs
 `)
     break
   default:
     // No subcommand (or unknown) — open TUI
-    const app = withFullScreen(<App />)
-    await app.start()
-    await app.waitUntilExit()
+    await launchTUI()
 }

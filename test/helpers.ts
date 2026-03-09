@@ -57,13 +57,6 @@ export function loadData(cwd: string) {
   return JSON.parse(raw)
 }
 
-export function claudeMdExists(cwd: string): boolean {
-  return existsSync(join(cwd, 'CLAUDE.md'))
-}
-
-export function readClaudeMd(cwd: string): string {
-  return readFileSync(join(cwd, 'CLAUDE.md'), 'utf-8')
-}
 
 /** Run a full feature workflow and return all the IDs */
 export function createFullFeature(cwd: string, title = 'Test-feature') {

@@ -39,24 +39,24 @@ describe('InitWizard', () => {
     expect(f).toContain('pm')
     expect(f).toContain('Project Manager for Claude Code')
     expect(f).toContain('Setup')
-    expect(f).toContain('Add CLAUDE.md instructions')
     expect(f).toContain('Whitelist pm commands')
+    expect(f).toContain('Set up Claude Code hooks')
     expect(f).toContain('Initialize data store')
     inst.cleanup()
   })
 
-  it('starts with cursor on CLAUDE.md step', () => {
+  it('starts with cursor on permissions step', () => {
     const inst = render(createElement(InitWizard))
     const f = lastFrame(inst)
-    expect(f).toMatch(/›.*Add CLAUDE\.md/)
+    expect(f).toMatch(/›.*Whitelist pm/)
     inst.cleanup()
   })
 
-  it('step order: CLAUDE.md → permissions → store', () => {
+  it('step order: permissions → hooks → store', () => {
     const inst = render(createElement(InitWizard))
     const f = lastFrame(inst)
-    const idx1 = f.indexOf('Add CLAUDE.md')
-    const idx2 = f.indexOf('Whitelist pm')
+    const idx1 = f.indexOf('Whitelist pm')
+    const idx2 = f.indexOf('Set up Claude Code hooks')
     const idx3 = f.indexOf('Initialize data')
     expect(idx1).toBeGreaterThan(-1)
     expect(idx1).toBeLessThan(idx2)
@@ -64,30 +64,23 @@ describe('InitWizard', () => {
     inst.cleanup()
   })
 
-  it('shows warning for CLAUDE.md on fresh project', () => {
-    const inst = render(createElement(InitWizard))
-    const f = lastFrame(inst)
-    expect(f).toContain('Your CLAUDE.md will be modified')
-    expect(f).toContain('PM:INSTRUCTIONS:START/END')
-    inst.cleanup()
-  })
-
   it('confirm all steps with y — creates all files', async () => {
     const inst = render(createElement(InitWizard))
 
-    // Step 1: CLAUDE.md
-    inst.stdin.write('y')
-    await delay()
-    expect(existsSync(join(cwd, 'CLAUDE.md'))).toBe(true)
-    expect(readFileSync(join(cwd, 'CLAUDE.md'), 'utf-8')).toContain('PM:INSTRUCTIONS:START')
-    expect(lastFrame(inst)).toMatch(/›.*Whitelist pm/)
-
-    // Step 2: Permissions
+    // Step 1: Permissions
     inst.stdin.write('y')
     await delay()
     const settingsPath = join(cwd, '.claude', 'settings.json')
     expect(existsSync(settingsPath)).toBe(true)
     expect(JSON.parse(readFileSync(settingsPath, 'utf-8')).permissions.allow).toContain('Bash(pm *)')
+    expect(lastFrame(inst)).toMatch(/›.*Set up Claude Code hooks/)
+
+    // Step 2: Hooks
+    inst.stdin.write('y')
+    await delay()
+    const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
+    expect(settings.hooks).toBeDefined()
+    expect(settings.hooks.PreToolUse).toBeDefined()
     expect(lastFrame(inst)).toMatch(/›.*Initialize data/)
 
     // Step 3: Data store
@@ -95,12 +88,14 @@ describe('InitWizard', () => {
     await delay()
     expect(existsSync(join(cwd, '.pm', 'data.json'))).toBe(true)
     const data = JSON.parse(readFileSync(join(cwd, '.pm', 'data.json'), 'utf-8'))
-    expect(data).toEqual({ features: [], issues: [], log: [] })
+    expect(data).toHaveProperty('features', [])
+    expect(data).toHaveProperty('issues', [])
+    expect(data).toHaveProperty('log', [])
 
     // Summary
     const f = lastFrame(inst)
     expect(f).toContain('Setup complete')
-    expect(f).toContain('Next steps')
+    expect(f).toContain('Press Enter to continue')
     inst.cleanup()
   })
 
@@ -109,11 +104,12 @@ describe('InitWizard', () => {
 
     inst.stdin.write('\r')
     await delay()
-    expect(existsSync(join(cwd, 'CLAUDE.md'))).toBe(true)
+    expect(existsSync(join(cwd, '.claude', 'settings.json'))).toBe(true)
 
     inst.stdin.write('\r')
     await delay()
-    expect(existsSync(join(cwd, '.claude', 'settings.json'))).toBe(true)
+    const settings = JSON.parse(readFileSync(join(cwd, '.claude', 'settings.json'), 'utf-8'))
+    expect(settings.hooks).toBeDefined()
 
     inst.stdin.write('\r')
     await delay()
@@ -133,7 +129,6 @@ describe('InitWizard', () => {
     inst.stdin.write('n')
     await delay()
 
-    expect(existsSync(join(cwd, 'CLAUDE.md'))).toBe(false)
     expect(existsSync(join(cwd, '.claude', 'settings.json'))).toBe(false)
     expect(existsSync(join(cwd, '.pm', 'data.json'))).toBe(false)
 
@@ -148,33 +143,34 @@ describe('InitWizard', () => {
 
     inst.stdin.write('q')
 
-    expect(existsSync(join(cwd, 'CLAUDE.md'))).toBe(false)
     expect(existsSync(join(cwd, '.claude', 'settings.json'))).toBe(false)
     expect(existsSync(join(cwd, '.pm', 'data.json'))).toBe(false)
     inst.cleanup()
   })
 
   it('already initialized — shows already status for all steps', async () => {
-    // Pre-create all files
-    writeFileSync(join(cwd, 'CLAUDE.md'), '<!-- PM:INSTRUCTIONS:START -->\ntest\n<!-- PM:INSTRUCTIONS:END -->\n')
+    // Pre-create all files including hooks
     mkdirSync(join(cwd, '.claude'), { recursive: true })
-    writeFileSync(join(cwd, '.claude', 'settings.json'), JSON.stringify({ permissions: { allow: ['Bash(pm *)'] } }, null, 2))
+    writeFileSync(join(cwd, '.claude', 'settings.json'), JSON.stringify({
+      permissions: { allow: ['Bash(pm *)'] },
+      hooks: { PreToolUse: [{ matcher: 'Edit|Write', hooks: [{ type: 'command', command: 'pm hook pre-edit' }] }] },
+    }, null, 2))
     mkdirSync(join(cwd, '.pm'), { recursive: true })
     writeFileSync(join(cwd, '.pm', 'data.json'), JSON.stringify({ features: [], issues: [], log: [] }, null, 2))
 
     const inst = render(createElement(InitWizard))
 
-    // Step 1: already
-    expect(lastFrame(inst)).toContain('already present')
-
-    inst.stdin.write('\r')
-    await delay()
-    // Step 2: already
+    // Step 1: permissions already
     expect(lastFrame(inst)).toContain('Permission already present')
 
     inst.stdin.write('\r')
     await delay()
-    // Step 3: already
+    // Step 2: hooks already
+    expect(lastFrame(inst)).toContain('already configured')
+
+    inst.stdin.write('\r')
+    await delay()
+    // Step 3: store already
     expect(lastFrame(inst)).toContain('already exists')
 
     inst.stdin.write('\r')
@@ -186,8 +182,11 @@ describe('InitWizard', () => {
   })
 
   it('n is ignored on already-done steps', async () => {
-    // Pre-create CLAUDE.md with PM section
-    writeFileSync(join(cwd, 'CLAUDE.md'), '<!-- PM:INSTRUCTIONS:START -->\ntest\n<!-- PM:INSTRUCTIONS:END -->\n')
+    // Pre-create permissions
+    mkdirSync(join(cwd, '.claude'), { recursive: true })
+    writeFileSync(join(cwd, '.claude', 'settings.json'), JSON.stringify({
+      permissions: { allow: ['Bash(pm *)'] },
+    }, null, 2))
 
     const inst = render(createElement(InitWizard))
 
@@ -195,27 +194,27 @@ describe('InitWizard', () => {
     inst.stdin.write('n')
     await delay()
     // Should still be on step 1 (not advanced)
-    expect(lastFrame(inst)).toMatch(/›.*Add CLAUDE\.md/)
+    expect(lastFrame(inst)).toMatch(/›.*Whitelist pm/)
 
     // Enter should advance
     inst.stdin.write('\r')
     await delay()
-    expect(lastFrame(inst)).toMatch(/›.*Whitelist pm/)
+    expect(lastFrame(inst)).toMatch(/›.*Set up Claude Code hooks/)
     inst.cleanup()
   })
 
   it('mixed: skip some, confirm others', async () => {
     const inst = render(createElement(InitWizard))
 
-    // Skip CLAUDE.md
+    // Skip permissions
     inst.stdin.write('n')
     await delay()
-    expect(existsSync(join(cwd, 'CLAUDE.md'))).toBe(false)
 
-    // Confirm permissions
+    // Confirm hooks
     inst.stdin.write('y')
     await delay()
-    expect(existsSync(join(cwd, '.claude', 'settings.json'))).toBe(true)
+    const settings = JSON.parse(readFileSync(join(cwd, '.claude', 'settings.json'), 'utf-8'))
+    expect(settings.hooks).toBeDefined()
 
     // Skip store
     inst.stdin.write('n')
@@ -227,37 +226,17 @@ describe('InitWizard', () => {
     inst.cleanup()
   })
 
-  it('updates existing CLAUDE.md without losing content', async () => {
-    writeFileSync(join(cwd, 'CLAUDE.md'), '# My Project\n\nCustom content.\n')
-
-    const inst = render(createElement(InitWizard))
-
-    inst.stdin.write('y')
-    await delay()
-
-    const content = readFileSync(join(cwd, 'CLAUDE.md'), 'utf-8')
-    expect(content).toContain('PM:INSTRUCTIONS:START')
-    expect(content).toContain('# My Project')
-    expect(content).toContain('Custom content.')
-
-    // Result should say "updated" not "created"
-    const f = lastFrame(inst)
-    expect(f).toContain('updated')
-    inst.cleanup()
-  })
-
   it('summary shows result notes for each step', async () => {
     const inst = render(createElement(InitWizard))
 
-    inst.stdin.write('y')
-    await delay()
     inst.stdin.write('n')
     await delay()
     inst.stdin.write('y')
     await delay()
+    inst.stdin.write('y')
+    await delay()
 
     const f = lastFrame(inst)
-    expect(f).toContain('created')    // CLAUDE.md
     expect(f).toContain('skipped')    // permissions
     expect(f).toContain('created')    // store
     inst.cleanup()
@@ -274,7 +253,11 @@ describe('InitWizard', () => {
   })
 
   it('prompt shows only continue for already-done steps', () => {
-    writeFileSync(join(cwd, 'CLAUDE.md'), '<!-- PM:INSTRUCTIONS:START -->\ntest\n<!-- PM:INSTRUCTIONS:END -->\n')
+    // Pre-create permissions so the first step is already done
+    mkdirSync(join(cwd, '.claude'), { recursive: true })
+    writeFileSync(join(cwd, '.claude', 'settings.json'), JSON.stringify({
+      permissions: { allow: ['Bash(pm *)'] },
+    }, null, 2))
 
     const inst = render(createElement(InitWizard))
     const f = lastFrame(inst)

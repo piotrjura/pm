@@ -14,11 +14,6 @@ export function cmdList() {
     const doneTasks = feature.phases.reduce((n, p) => n + p.tasks.filter(t => t.status === 'done').length, 0)
     console.log(`\n[${feature.status.toUpperCase()}] ${feature.title}  (${doneTasks}/${totalTasks} tasks)`)
 
-    const doneIds = new Set<string>()
-    for (const phase of feature.phases)
-      for (const task of phase.tasks)
-        if (task.status === 'done') doneIds.add(task.id)
-
     for (const phase of feature.phases) {
       console.log(`  ${phase.title}  [${phase.id}]`)
       for (const task of phase.tasks) {
@@ -26,8 +21,6 @@ export function cmdList() {
         const id = task.status !== 'done' ? `  [${task.id}]` : ''
         const meta: string[] = []
         if (task.priority !== undefined && task.priority !== 3) meta.push(`P${task.priority}`)
-        const unsatisfied = (task.dependsOn ?? []).filter(depId => !doneIds.has(depId))
-        if (unsatisfied.length > 0) meta.push('[blocked]')
         const suffix = meta.length > 0 ? `  ${meta.join(' ')}` : ''
         console.log(`    ${icon} ${task.title}${id}${suffix}`)
       }

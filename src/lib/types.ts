@@ -1,5 +1,14 @@
 // Domain model
 
+export interface Decision {
+  /** What was decided */
+  decision: string
+  /** Why — context, reasoning, alternatives considered */
+  reasoning?: string
+  /** When */
+  at: string
+}
+
 export interface Task {
   id: string
   title: string
@@ -9,10 +18,11 @@ export interface Task {
   attempt?: number
   maxAttempts?: number
   priority?: number
-  dependsOn?: string[]
   requiresReview?: boolean
   /** Implementation note left by the agent when marking done */
   note?: string
+  /** Key decisions made during this task */
+  decisions?: Decision[]
   doneAt?: string
   startedAt?: string
 }
@@ -31,6 +41,8 @@ export interface Feature {
   description?: string
   status: 'draft' | 'planned' | 'in-progress' | 'done'
   phases: Phase[]
+  /** Feature-level decisions (architecture, approach, scope) */
+  decisions?: Decision[]
   createdAt: string
   updatedAt: string
   doneAt?: string
@@ -44,7 +56,8 @@ export interface Issue {
   description?: string
   status: 'triage' | 'backlog' | 'todo' | 'in-progress' | 'done'
   priority: 'urgent' | 'high' | 'medium' | 'low'
-  featureId?: string
+  /** Key decisions made while resolving this issue */
+  decisions?: Decision[]
   createdAt: string
 }
 
@@ -55,7 +68,7 @@ export interface LogEntry {
   phaseTitle: string
   featureId: string
   featureTitle: string
-  action: 'started' | 'completed' | 'error' | 'rejected'
+  action: 'started' | 'completed' | 'error' | 'rejected' | 'reset'
   at: string
   agent?: string
   note?: string
@@ -63,6 +76,7 @@ export interface LogEntry {
 }
 
 export interface DataStore {
+  pmVersion?: string
   features: Feature[]
   issues: Issue[]
   log: LogEntry[]

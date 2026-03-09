@@ -1,10 +1,7 @@
 import { getNextTask } from '../lib/store.js'
-import { updateClaudeMd } from '../lib/claude-md.js'
 
 export function cmdNext() {
   const next = getNextTask()
-
-  updateClaudeMd()
 
   if (!next) {
     console.log('No pending tasks. All done — or add features with: pm add-feature')

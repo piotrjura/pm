@@ -86,20 +86,6 @@ describe('getNextTask', { timeout: 15_000 }, () => {
     expect(stdout).toContain('High')
   })
 
-  it('respects dependency blocking', () => {
-    const feat = pm('add-feature F', cwd)
-    const featureId = feat.stdout.match(/^feature:(\S+)/m)![1]
-    const phase = pm(`add-phase ${featureId} P`, cwd)
-    const phaseId = phase.stdout.match(/^phase:(\S+)/m)![1]
-    const t1 = pm(`add-task ${featureId} ${phaseId} First`, cwd)
-    const taskId1 = t1.stdout.match(/^task:(\S+)/m)![1]
-    pm(`add-task ${featureId} ${phaseId} Second --depends-on ${taskId1}`, cwd)
-
-    const { stdout } = pm('next', cwd)
-    expect(stdout).toContain('First')
-    expect(stdout).not.toContain('Second')
-  })
-
   it('skips draft features', () => {
     pm('add-feature Draft', cwd)
     const { stdout } = pm('next', cwd)

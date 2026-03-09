@@ -1,5 +1,4 @@
 import { approveTask, rejectTask } from '../lib/store.js'
-import { updateClaudeMd } from '../lib/claude-md.js'
 
 export function cmdReview(args: string[]) {
   const taskId = args[0]
@@ -13,7 +12,7 @@ export function cmdReview(args: string[]) {
 
   if (args.includes('--approve')) {
     const nextTask = approveTask(taskId)
-    updateClaudeMd()
+
     console.log(`Approved: task ${taskId}`)
     if (nextTask) {
       console.log()
@@ -24,7 +23,7 @@ export function cmdReview(args: string[]) {
     }
   } else if (args.includes('--reject')) {
     const nextTask = rejectTask(taskId, note)
-    updateClaudeMd()
+
     console.log(`Rejected: task ${taskId}`)
     if (note) console.log(`Note : ${note}`)
     console.log()

@@ -1,7 +1,8 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { nanoid } from 'nanoid'
-import type { DataStore, Feature, Phase, Issue, Task, LogEntry, NextTask } from './types.js'
+import type { DataStore, Feature, Phase, Issue, Task, LogEntry, NextTask, Decision } from './types.js'
+import { PM_VERSION } from './version.js'
 
 const PM_DIR = join(process.cwd(), '.pm')
 const DATA_FILE = join(PM_DIR, 'data.json')
@@ -15,7 +16,7 @@ function ensureDir() {
 export function loadStore(): DataStore {
   ensureDir()
   if (!existsSync(DATA_FILE)) {
-    const empty: DataStore = { features: [], issues: [], log: [] }
+    const empty: DataStore = { pmVersion: PM_VERSION, features: [], issues: [], log: [] }
     saveStore(empty)
     return empty
   }
@@ -30,6 +31,7 @@ export function loadStore(): DataStore {
     if (!i.type) { i.type = 'bug'; migrated = true }
   }
   if (data.cycles !== undefined) { delete data.cycles; migrated = true }
+  if (data.pmVersion !== PM_VERSION) { data.pmVersion = PM_VERSION; migrated = true }
   if (migrated) saveStore(data)
   return data
 }
@@ -182,19 +184,11 @@ export function getNextTask(): NextTask | null {
   for (const feature of store.features) {
     if (feature.status === 'done' || feature.status === 'draft') continue
 
-    const doneIds = new Set<string>()
-    for (const phase of feature.phases)
-      for (const task of phase.tasks)
-        if (task.status === 'done') doneIds.add(task.id)
-
     const eligible: Array<{ task: Task; phase: Phase; priority: number }> = []
     for (const phase of feature.phases) {
       for (const task of phase.tasks) {
         if (task.status !== 'pending') continue
-        const deps = task.dependsOn ?? []
-        if (deps.every(id => doneIds.has(id))) {
-          eligible.push({ task, phase, priority: task.priority ?? 3 })
-        }
+        eligible.push({ task, phase, priority: task.priority ?? 3 })
       }
     }
 
@@ -485,5 +479,260 @@ export function getFeatureProgress(feature: Feature): { done: number; total: num
     }
   }
   return { done, total }
+}
+
+// Decision search
+
+export interface DecisionMatch {
+  decision: Decision
+  /** Where this decision lives */
+  source:
+    | { type: 'feature'; featureId: string; featureTitle: string }
+    | { type: 'task'; featureId: string; featureTitle: string; taskId: string; taskTitle: string }
+    | { type: 'issue'; issueId: string; issueTitle: string }
+}
+
+/** Search all decisions across features, tasks, and issues. Case-insensitive substring match on decision text and reasoning. */
+export function searchDecisions(query: string): DecisionMatch[] {
+  const store = loadStore()
+  const q = query.toLowerCase()
+  const matches: DecisionMatch[] = []
+
+  for (const feature of store.features) {
+    // Feature-level decisions
+    for (const d of feature.decisions ?? []) {
+      if (matchesDecision(d, q)) {
+        matches.push({ decision: d, source: { type: 'feature', featureId: feature.id, featureTitle: feature.title } })
+      }
+    }
+    // Task-level decisions
+    for (const phase of feature.phases) {
+      for (const task of phase.tasks) {
+        for (const d of task.decisions ?? []) {
+          if (matchesDecision(d, q)) {
+            matches.push({ decision: d, source: { type: 'task', featureId: feature.id, featureTitle: feature.title, taskId: task.id, taskTitle: task.title } })
+          }
+        }
+      }
+    }
+  }
+
+  // Issue-level decisions
+  for (const issue of store.issues) {
+    for (const d of issue.decisions ?? []) {
+      if (matchesDecision(d, q)) {
+        matches.push({ decision: d, source: { type: 'issue', issueId: issue.id, issueTitle: issue.title } })
+      }
+    }
+  }
+
+  // Sort newest first
+  matches.sort((a, b) => b.decision.at.localeCompare(a.decision.at))
+  return matches
+}
+
+// Cleanup — reset stuck/error tasks, delete empty drafts, get action items
+
+export interface ResetResult {
+  tasksReset: Array<{ taskId: string; taskTitle: string; featureTitle: string }>
+  featuresReverted: Array<{ featureId: string; featureTitle: string }>
+}
+
+export interface ActionItems {
+  errorTasks: Array<{ taskId: string; taskTitle: string; featureTitle: string }>
+  emptyDrafts: Array<{ featureId: string; featureTitle: string }>
+  openIssues: Array<{ issueId: string; issueTitle: string; priority: string }>
+}
+
+/** Reset all in-progress tasks to pending. Returns what was reset. */
+export function resetStuckTasks(): ResetResult {
+  const store = loadStore()
+  const tasksReset: ResetResult['tasksReset'] = []
+  const featuresReverted: ResetResult['featuresReverted'] = []
+
+  for (const feature of store.features) {
+    if (feature.status === 'done') continue
+
+    let hadInProgress = false
+    for (const phase of feature.phases) {
+      for (const task of phase.tasks) {
+        if (task.status === 'in-progress') {
+          hadInProgress = true
+          task.status = 'pending'
+          task.startedAt = undefined
+          tasksReset.push({ taskId: task.id, taskTitle: task.title, featureTitle: feature.title })
+        }
+      }
+    }
+
+    // Fix feature status if needed
+    if (hadInProgress) {
+      const hasDone = feature.phases.some(p => p.tasks.some(t => t.status === 'done'))
+      const hasInProgress = feature.phases.some(p => p.tasks.some(t => t.status === 'in-progress'))
+      if (!hasInProgress && !hasDone) {
+        feature.status = 'planned'
+        featuresReverted.push({ featureId: feature.id, featureTitle: feature.title })
+      }
+    }
+  }
+
+  if (tasksReset.length > 0) {
+    saveStore(store)
+    for (const t of tasksReset) {
+      for (const feature of store.features) {
+        for (const phase of feature.phases) {
+          const task = phase.tasks.find(tk => tk.id === t.taskId)
+          if (task) {
+            appendLog({
+              taskId: t.taskId,
+              taskTitle: t.taskTitle,
+              phaseId: phase.id,
+              phaseTitle: phase.title,
+              featureId: feature.id,
+              featureTitle: feature.title,
+              action: 'reset',
+              note: 'auto-reset: previous session interrupted',
+            })
+          }
+        }
+      }
+    }
+  }
+
+  return { tasksReset, featuresReverted }
+}
+
+/** Reset all error tasks to pending. Returns what was reset. */
+export function resetErrorTasks(): ResetResult {
+  const store = loadStore()
+  const tasksReset: ResetResult['tasksReset'] = []
+  const featuresReverted: ResetResult['featuresReverted'] = []
+
+  for (const feature of store.features) {
+    if (feature.status === 'done') continue
+
+    for (const phase of feature.phases) {
+      for (const task of phase.tasks) {
+        if (task.status === 'error') {
+          task.status = 'pending'
+          tasksReset.push({ taskId: task.id, taskTitle: task.title, featureTitle: feature.title })
+        }
+      }
+    }
+  }
+
+  if (tasksReset.length > 0) {
+    saveStore(store)
+    for (const t of tasksReset) {
+      for (const feature of store.features) {
+        for (const phase of feature.phases) {
+          const task = phase.tasks.find(tk => tk.id === t.taskId)
+          if (task) {
+            appendLog({
+              taskId: t.taskId,
+              taskTitle: t.taskTitle,
+              phaseId: phase.id,
+              phaseTitle: phase.title,
+              featureId: feature.id,
+              featureTitle: feature.title,
+              action: 'reset',
+              note: 'reset: error task cleared',
+            })
+          }
+        }
+      }
+    }
+  }
+
+  return { tasksReset, featuresReverted }
+}
+
+/** Delete features that are draft with no phases. Returns deleted features. */
+export function deleteEmptyDraftFeatures(): Array<{ featureId: string; featureTitle: string }> {
+  const store = loadStore()
+  const deleted: Array<{ featureId: string; featureTitle: string }> = []
+
+  store.features = store.features.filter(f => {
+    if (f.status === 'draft' && f.phases.length === 0) {
+      deleted.push({ featureId: f.id, featureTitle: f.title })
+      return false
+    }
+    return true
+  })
+
+  if (deleted.length > 0) saveStore(store)
+  return deleted
+}
+
+/** Get action items needing attention (read-only). */
+export function getActionItems(): ActionItems {
+  const store = loadStore()
+  const errorTasks: ActionItems['errorTasks'] = []
+  const emptyDrafts: ActionItems['emptyDrafts'] = []
+  const openIssues: ActionItems['openIssues'] = []
+
+  for (const feature of store.features) {
+    if (feature.status === 'draft' && feature.phases.length === 0) {
+      emptyDrafts.push({ featureId: feature.id, featureTitle: feature.title })
+    }
+    for (const phase of feature.phases) {
+      for (const task of phase.tasks) {
+        if (task.status === 'error') {
+          errorTasks.push({ taskId: task.id, taskTitle: task.title, featureTitle: feature.title })
+        }
+      }
+    }
+  }
+
+  for (const issue of store.issues) {
+    if (issue.status !== 'done') {
+      openIssues.push({ issueId: issue.id, issueTitle: issue.title, priority: issue.priority })
+    }
+  }
+
+  return { errorTasks, emptyDrafts, openIssues }
+}
+
+function matchesDecision(d: Decision, q: string): boolean {
+  return d.decision.toLowerCase().includes(q) || (d.reasoning?.toLowerCase().includes(q) ?? false)
+}
+
+// Decisions
+
+/** Add a decision to a feature, task, or issue. Searches by ID across all entities. */
+export function addDecision(id: string, decision: string, reasoning?: string): Decision | null {
+  const store = loadStore()
+  const entry: Decision = { decision, reasoning, at: new Date().toISOString() }
+
+  // Try features
+  for (const feature of store.features) {
+    if (feature.id === id) {
+      feature.decisions = [...(feature.decisions ?? []), entry]
+      feature.updatedAt = new Date().toISOString()
+      saveStore(store)
+      return entry
+    }
+    // Try tasks within features
+    for (const phase of feature.phases) {
+      const task = phase.tasks.find(t => t.id === id)
+      if (task) {
+        task.decisions = [...(task.decisions ?? []), entry]
+        feature.updatedAt = new Date().toISOString()
+        saveStore(store)
+        return entry
+      }
+    }
+  }
+
+  // Try issues
+  for (const issue of store.issues) {
+    if (issue.id === id) {
+      issue.decisions = [...(issue.decisions ?? []), entry]
+      saveStore(store)
+      return entry
+    }
+  }
+
+  return null
 }
 

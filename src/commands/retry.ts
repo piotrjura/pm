@@ -1,5 +1,4 @@
 import { markTaskRetry, getLog, loadStore } from '../lib/store.js'
-import { updateClaudeMd } from '../lib/claude-md.js'
 import { parseFlag } from '../lib/args.js'
 
 function findTask(taskId: string) {
@@ -45,8 +44,6 @@ export function cmdRetry(args: string[]) {
     console.error(`Failed to retry task ${taskId}`)
     process.exit(1)
   }
-
-  updateClaudeMd()
 
   console.log(`Retry: task ${taskId} (attempt ${attempt + 1} of ${maxAttempts})`)
   if (priorNotes.length > 0) {

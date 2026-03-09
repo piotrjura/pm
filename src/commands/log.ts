@@ -13,7 +13,7 @@ export function cmdLog(args: string[]) {
 
   for (const entry of entries) {
     const time = new Date(entry.at).toLocaleString()
-    const icon = entry.action === 'completed' ? '✓' : entry.action === 'started' ? '▶' : '✗'
+    const icon = entry.action === 'completed' ? '✓' : entry.action === 'started' ? '▶' : entry.action === 'reset' ? '↺' : '✗'
     const agent = entry.agent ? ` [${entry.agent}]` : ''
     console.log(`${icon} ${time}${agent}`)
     console.log(`  ${entry.featureTitle} › ${entry.phaseTitle} › ${entry.taskTitle}`)

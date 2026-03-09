@@ -1,5 +1,4 @@
 import { markTaskError } from '../lib/store.js'
-import { updateClaudeMd } from '../lib/claude-md.js'
 import { parseFlag } from '../lib/args.js'
 
 export function cmdError(args: string[]) {
@@ -13,7 +12,6 @@ export function cmdError(args: string[]) {
   const note = parseFlag(args, '--note')
 
   markTaskError(taskId, agent, note)
-  updateClaudeMd()
 
   console.log(`Error: task ${taskId}`)
   if (note) console.log(`Note : ${note}`)

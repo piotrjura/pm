@@ -4,10 +4,10 @@ import { basename } from 'node:path'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
-import { updateClaudeMd } from '../lib/claude-md.js'
 import { ensureClaudePermission } from '../lib/init.js'
-
-const PM_VERSION = '0.1.0'
+import { ensureHooks } from '../lib/hooks.js'
+import { PM_VERSION } from '../lib/version.js'
+import { Logo } from './logo.js'
 const PERM_RULE = 'Bash(pm *)'
 
 interface StepDef {
@@ -16,8 +16,8 @@ interface StepDef {
 }
 
 const STEPS: StepDef[] = [
-  { id: 'claude-md', title: 'Add CLAUDE.md instructions' },
   { id: 'permissions', title: 'Whitelist pm commands' },
+  { id: 'hooks', title: 'Set up Claude Code hooks' },
   { id: 'store', title: 'Initialize data store' },
 ]
 
@@ -39,12 +39,8 @@ export function InitWizard() {
   const [initial] = useState(() => {
     const pmDir = join(projectDir, '.pm')
     const dataFile = join(pmDir, 'data.json')
-    const claudeMdPath = join(projectDir, 'CLAUDE.md')
 
     const dataExists = existsSync(dataFile)
-    const claudeMdExists = existsSync(claudeMdPath)
-    const hasPmSection = claudeMdExists
-      && readFileSync(claudeMdPath, 'utf-8').includes('<!-- PM:INSTRUCTIONS:START -->')
 
     const hasPermission = (() => {
       try {
@@ -54,13 +50,24 @@ export function InitWizard() {
       } catch { return false }
     })()
 
-    return { pmDir, dataFile, claudeMdPath, dataExists, claudeMdExists, hasPmSection, hasPermission }
+    const hasHooks = (() => {
+      try {
+        const settingsPath = join(projectDir, '.claude', 'settings.json')
+        const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
+        const hooks = settings.hooks?.PreToolUse ?? []
+        return hooks.some((c: { hooks?: Array<{ command?: string }> }) =>
+          c.hooks?.some(h => h.command?.startsWith('pm hook'))
+        )
+      } catch { return false }
+    })()
+
+    return { pmDir, dataFile, dataExists, hasPermission, hasHooks }
   })
 
   function isAlreadyDone(stepId: string): boolean {
     switch (stepId) {
-      case 'claude-md': return initial.hasPmSection
       case 'permissions': return initial.hasPermission
+      case 'hooks': return initial.hasHooks
       case 'store': return initial.dataExists
       default: return false
     }
@@ -68,15 +75,17 @@ export function InitWizard() {
 
   function executeStep(stepId: string): StepResult {
     switch (stepId) {
-      case 'claude-md':
-        if (initial.hasPmSection) return { status: 'already', note: 'already configured' }
-        updateClaudeMd(projectDir)
-        return { status: 'done', note: initial.claudeMdExists ? 'updated' : 'created' }
       case 'permissions': {
         const r = ensureClaudePermission()
         return r === 'exists'
           ? { status: 'already', note: 'already configured' }
           : { status: 'done', note: `added "${PERM_RULE}"` }
+      }
+      case 'hooks': {
+        const r = ensureHooks(projectDir)
+        return r === 'exists'
+          ? { status: 'already', note: 'already configured' }
+          : { status: 'done', note: `${r} hooks in .claude/settings.json` }
       }
       case 'store':
         if (initial.dataExists) return { status: 'already', note: 'already exists' }
@@ -101,10 +110,14 @@ export function InitWizard() {
   }
 
   useInput((input, key) => {
-    if (input === 'q') { exit(); return }
+    if (input === 'q') { process.exitCode = 1; exit(); return }
 
     if (finished) {
-      if (key.return) exit()
+      if (key.return) {
+        // Signal success so cli.tsx can launch the TUI
+        process.exitCode = 0
+        exit()
+      }
       return
     }
 
@@ -122,10 +135,8 @@ export function InitWizard() {
     <Box flexDirection="column" paddingX={2} paddingY={1}>
       {/* Logo header */}
       <Box marginBottom={1}>
-        <Box flexDirection="column" marginRight={3}>
-          <Text>{'▐▛▀▀▜▌'}</Text>
-          <Text>{'▐▌'}<Text color="green">{'✓'}</Text>{'•▐▌'}</Text>
-          <Text>{'▝▜▄▄▛▘'}</Text>
+        <Box marginRight={3}>
+          <Logo />
         </Box>
         <Box flexDirection="column">
           <Text bold>pm <Text dimColor>v{PM_VERSION}</Text></Text>
@@ -193,17 +204,13 @@ export function InitWizard() {
       {/* Prompt — below the step list */}
       <Box marginTop={1} paddingLeft={4}>
         {finished ? (
-          <Box flexDirection="column">
-            <Box flexDirection="column" marginTop={1}>
-              <Text dimColor>Next steps:</Text>
-              <Text dimColor>{'  '}pm add-feature "My feature" --description "..."</Text>
-              <Text dimColor>{'  '}pm next</Text>
-            </Box>
-            <Box marginTop={1}>
-              <Text dimColor>Press </Text>
-              <Text bold color="cyan">Enter</Text>
-              <Text dimColor> to exit</Text>
-            </Box>
+          <Box>
+            <Text dimColor>Press </Text>
+            <Text bold color="cyan">Enter</Text>
+            <Text dimColor> to continue</Text>
+            <Text dimColor>{' · '}</Text>
+            <Text bold color="cyan">q</Text>
+            <Text dimColor> to quit</Text>
           </Box>
         ) : (
           <StepPrompt already={isAlreadyDone(STEPS[currentStep].id)} />
@@ -216,26 +223,11 @@ export function InitWizard() {
 function StepDetail({ stepId, initial }: {
   stepId: string
   initial: {
-    hasPmSection: boolean
-    claudeMdExists: boolean
     hasPermission: boolean
     dataExists: boolean
   }
 }) {
   switch (stepId) {
-    case 'claude-md':
-      return initial.hasPmSection ? (
-        <Box paddingLeft={3}>
-          <Text dimColor>{'↳'} PM section already present</Text>
-        </Box>
-      ) : (
-        <Box flexDirection="column" paddingLeft={3}>
-          <Text color="yellow">{'⚠'} Your CLAUDE.md will be modified</Text>
-          <Text dimColor>pm will prepend task-tracking instructions wrapped in</Text>
-          <Text dimColor>{'<!-- PM:INSTRUCTIONS:START/END -->'} comment markers.</Text>
-        </Box>
-      )
-
     case 'permissions':
       return initial.hasPermission ? (
         <Box paddingLeft={3}>

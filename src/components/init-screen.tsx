@@ -2,6 +2,8 @@ import React from 'react'
 import { Box, Text, useInput } from 'ink'
 import { basename } from 'node:path'
 import type { ProjectStatus } from '../lib/init.js'
+import { PM_VERSION } from '../lib/version.js'
+import { Logo } from './logo.js'
 
 interface InitScreenProps {
   status: ProjectStatus
@@ -21,13 +23,11 @@ export function InitScreen({ status, onConfirm, onQuit }: InitScreenProps) {
     <Box flexDirection="column" padding={2} gap={1}>
       {/* Logo header */}
       <Box>
-        <Box flexDirection="column" marginRight={3}>
-          <Text>{'▐▛▀▀▜▌'}</Text>
-          <Text>{'▐▌'}<Text color="green">{'✓'}</Text>{'•▐▌'}</Text>
-          <Text>{'▝▜▄▄▛▘'}</Text>
+        <Box marginRight={3}>
+          <Logo />
         </Box>
         <Box flexDirection="column">
-          <Text bold>pm <Text dimColor>v0.1.0</Text></Text>
+          <Text bold>pm <Text dimColor>v{PM_VERSION}</Text></Text>
           <Text dimColor>Project Manager for Claude Code</Text>
           <Text dimColor>{status.projectDir}</Text>
         </Box>
@@ -36,7 +36,6 @@ export function InitScreen({ status, onConfirm, onQuit }: InitScreenProps) {
       <Box flexDirection="column" marginTop={1}>
         <Text dimColor>Status:</Text>
         <Text>  {status.hasDataFile ? <Text color="green">{'✓'}</Text> : '○'} .pm/data.json   {status.hasDataFile ? <Text dimColor>exists</Text> : <Text color="yellow">will be created</Text>}</Text>
-        <Text>  {status.hasPmSection ? <Text color="green">{'✓'}</Text> : '○'} CLAUDE.md       {status.hasPmSection ? <Text dimColor>PM section present</Text> : status.hasClaudeMd ? <Text color="yellow">PM section will be added</Text> : <Text color="yellow">will be created</Text>}</Text>
       </Box>
 
       <Box marginTop={1}>

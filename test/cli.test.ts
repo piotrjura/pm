@@ -1,7 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { writeFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { createTestDir, cleanupTestDir, pm, loadData, dataFileExists, claudeMdExists, readClaudeMd, createFullFeature } from './helpers.js'
+import { createTestDir, cleanupTestDir, pm, loadData, dataFileExists, createFullFeature } from './helpers.js'
 
 let cwd: string
 
@@ -20,43 +18,10 @@ describe('pm help', () => {
 })
 
 describe('pm init', () => {
-  it('creates .pm dir and CLAUDE.md', () => {
+  it('creates .pm dir and data file', () => {
     const { stdout } = pm('init', cwd)
     expect(stdout).toContain('Initialized pm')
-    expect(claudeMdExists(cwd)).toBe(true)
-    expect(readClaudeMd(cwd)).toContain('PM:INSTRUCTIONS:START')
-  })
-
-  it('preserves existing CLAUDE.md content', () => {
-    writeFileSync(join(cwd, 'CLAUDE.md'), '# My Project\n\nImportant instructions here.\n')
-    pm('init', cwd)
-    const content = readClaudeMd(cwd)
-    expect(content).toContain('PM:INSTRUCTIONS:START')
-    expect(content).toContain('# My Project')
-    expect(content).toContain('Important instructions here.')
-  })
-
-  it('preserves content when run twice', () => {
-    writeFileSync(join(cwd, 'CLAUDE.md'), '# My Project\n\nDo not lose this.\n')
-    pm('init', cwd)
-    pm('init', cwd)
-    const content = readClaudeMd(cwd)
-    expect(content).toContain('# My Project')
-    expect(content).toContain('Do not lose this.')
-    // Should have exactly one PM instructions block, not duplicated
-    const count = content.split('PM:INSTRUCTIONS:START').length - 1
-    expect(count).toBe(1)
-  })
-
-  it('preserves content after other commands that update CLAUDE.md', () => {
-    writeFileSync(join(cwd, 'CLAUDE.md'), '# My Project\n\nCustom rules.\n')
-    pm('init', cwd)
-    const { featureId } = createFullFeature(cwd)
-    pm('next', cwd)
-    const content = readClaudeMd(cwd)
-    expect(content).toContain('# My Project')
-    expect(content).toContain('Custom rules.')
-    expect(content).toContain('PM:INSTRUCTIONS:START')
+    expect(dataFileExists(cwd)).toBe(true)
   })
 })
 
@@ -118,20 +83,19 @@ describe('pm add-task', () => {
     expect(phase.tasks[0].status).toBe('pending')
   })
 
-  it('supports --description --files --priority --depends-on', () => {
+  it('supports --description --files --priority', () => {
     const feat = pm('add-feature F', cwd)
     const featureId = feat.stdout.match(/^feature:(\S+)/m)![1]
     const phase = pm(`add-phase ${featureId} P`, cwd)
     const phaseId = phase.stdout.match(/^phase:(\S+)/m)![1]
 
-    pm(`add-task ${featureId} ${phaseId} T --description Desc --files a.ts,b.ts --priority 1 --depends-on dep1,dep2`, cwd)
+    pm(`add-task ${featureId} ${phaseId} T --description Desc --files a.ts,b.ts --priority 1`, cwd)
 
     const data = loadData(cwd)
     const task = data.features[0].phases[0].tasks[0]
     expect(task.description).toBe('Desc')
     expect(task.files).toEqual(['a.ts', 'b.ts'])
     expect(task.priority).toBe(1)
-    expect(task.dependsOn).toEqual(['dep1', 'dep2'])
   })
 })
 
@@ -445,21 +409,6 @@ describe('pm update', () => {
   })
 })
 
-describe('CLAUDE.md management', () => {
-  it('init creates CLAUDE.md with instructions', () => {
-    pm('init', cwd)
-    const content = readClaudeMd(cwd)
-    expect(content).toContain('PM:INSTRUCTIONS:START')
-    expect(content).toContain('pm add-issue')
-    expect(content).toContain('PM:INSTRUCTIONS:END')
-  })
-
-  it('next updates CLAUDE.md', () => {
-    createFullFeature(cwd)
-    pm('next', cwd)
-    expect(claudeMdExists(cwd)).toBe(true)
-  })
-})
 
 describe('full workflow', { timeout: 30_000 }, () => {
   it('feature lifecycle: create → plan → start → done', () => {
@@ -473,10 +422,10 @@ describe('full workflow', { timeout: 30_000 }, () => {
 
     const t1 = pm(`add-task ${featureId} ${phaseId1} "Write spec"`, cwd)
     const taskId1 = t1.stdout.match(/^task:(\S+)/m)![1]
-    const t2 = pm(`add-task ${featureId} ${phaseId2} "Build login" --depends-on ${taskId1}`, cwd)
+    const t2 = pm(`add-task ${featureId} ${phaseId2} "Build login"`, cwd)
     const taskId2 = t2.stdout.match(/^task:(\S+)/m)![1]
 
-    // Next should show first task (t2 is blocked)
+    // Next should show first task (highest priority / first added)
     const next1 = pm('next', cwd)
     expect(next1.stdout).toContain('Write spec')
 
@@ -484,7 +433,7 @@ describe('full workflow', { timeout: 30_000 }, () => {
     pm(`start ${taskId1}`, cwd)
     pm(`done ${taskId1} --note "Spec written"`, cwd)
 
-    // Now second task should be unblocked
+    // Second task now next
     const next2 = pm('next', cwd)
     expect(next2.stdout).toContain('Build login')
 
