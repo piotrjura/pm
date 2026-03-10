@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react'
 import { Box, useApp, useInput, useStdout } from 'ink'
+import path from 'node:path'
 import { StatusBar } from './components/status-bar.js'
 import { UnifiedList } from './components/unified-list.js'
 import { FeatureDetail } from './components/feature-detail.js'
@@ -12,6 +13,12 @@ import { detectProjectStatus, isInitialized, ensureClaudePermission, detectUpgra
 import type { UpgradeInfo } from './lib/init.js'
 import { loadStore } from './lib/store.js'
 import { ensureHooks } from './lib/hooks.js'
+
+function setTerminalTitle(title: string) {
+  process.stdout.write(`\x1b]2;${title}\x07`)
+}
+
+const projectName = path.basename(process.cwd())
 
 export function App() {
   const { exit } = useApp()
@@ -52,6 +59,25 @@ export function App() {
     setInitialized(true)
     store.refresh()
   }, [store])
+
+  // Update terminal tab title based on current view
+  useEffect(() => {
+    if (!initialized) return
+    if (nav.screen.type === 'feature-detail') {
+      const feature = store.store.features.find(f => f.id === (nav.screen as { featureId: string }).featureId)
+      setTerminalTitle(`pm — ${projectName} — ${feature?.title ?? 'Feature'}`)
+    } else if (nav.screen.type === 'issue-detail') {
+      const issue = store.store.issues.find(i => i.id === (nav.screen as { issueId: string }).issueId)
+      setTerminalTitle(`pm — ${projectName} — ${issue?.title ?? 'Issue'}`)
+    } else {
+      setTerminalTitle(`pm — ${projectName}`)
+    }
+  }, [initialized, nav.screen, store.store.features, store.store.issues])
+
+  // Restore title on unmount
+  useEffect(() => {
+    return () => { setTerminalTitle('') }
+  }, [])
 
   useInput((input, key) => {
     if (!initialized) return
