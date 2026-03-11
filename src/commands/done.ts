@@ -1,4 +1,4 @@
-import { markTaskDone, updateIssue, loadStore } from '../lib/store.js'
+import { markTaskDone, markIssueDone, loadStore } from '../lib/store.js'
 import { parseFlag, hasFlag } from '../lib/args.js'
 
 export function cmdDone(args: string[]) {
@@ -12,13 +12,17 @@ export function cmdDone(args: string[]) {
   const note = parseFlag(args, '--note')
   const forceReview = hasFlag(args, '--review')
 
-  const store = loadStore()
+  // Try as issue first (with or without issue: prefix)
   const issueId = id.startsWith('issue:') ? id.slice(6) : id
+  const store = loadStore()
   const issue = store.issues.find(i => i.id === issueId)
   if (issue) {
-    updateIssue(issueId, { status: 'done' })
-
-    console.log(`Done: issue ${id}`)
+    const result = markIssueDone(issueId, agent, note)
+    if (result && result.status === 'done' && issue.status === 'done') {
+      console.log(`Already done: issue ${issueId}`)
+    } else {
+      console.log(`Done: issue ${issueId}`)
+    }
     if (note) console.log(`Note : ${note}`)
     return
   }

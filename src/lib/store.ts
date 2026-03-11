@@ -113,6 +113,33 @@ export function deleteIssue(id: string) {
   saveStore(store)
 }
 
+/** Start an issue — transitions to in-progress from any non-done state. Idempotent if already in-progress. */
+export function markIssueStarted(issueId: string, agent?: string): Issue | null {
+  const store = loadStore()
+  const idx = store.issues.findIndex(i => i.id === issueId)
+  if (idx === -1) return null
+  const issue = store.issues[idx]
+  if (issue.status === 'in-progress') return issue // already started
+  if (issue.status === 'done') return null // can't start a done issue
+  store.issues[idx] = { ...issue, status: 'in-progress' }
+  saveStore(store)
+  appendLog({ issueId, issueTitle: issue.title, action: 'started', agent })
+  return store.issues[idx]
+}
+
+/** Mark an issue done — works from any state. Auto-starts if needed. Idempotent if already done. */
+export function markIssueDone(issueId: string, agent?: string, note?: string): Issue | null {
+  const store = loadStore()
+  const idx = store.issues.findIndex(i => i.id === issueId)
+  if (idx === -1) return null
+  const issue = store.issues[idx]
+  if (issue.status === 'done') return issue // already done, idempotent
+  store.issues[idx] = { ...issue, status: 'done' }
+  saveStore(store)
+  appendLog({ issueId, issueTitle: issue.title, action: 'completed', agent, note })
+  return store.issues[idx]
+}
+
 // Phase + Task creation (for CLI-driven agent workflow)
 
 export function addPhaseToFeature(featureId: string, title: string): Phase | null {
@@ -218,7 +245,11 @@ export function markTaskStarted(taskId: string, agent?: string): { task: Task; n
     for (const phase of feature.phases) {
       const idx = phase.tasks.findIndex(t => t.id === taskId)
       if (idx !== -1) {
-        phase.tasks[idx] = { ...phase.tasks[idx], status: 'in-progress', startedAt: new Date().toISOString() }
+        const task = phase.tasks[idx]
+        // Don't restart done or already in-progress tasks
+        if (task.status === 'done') return null
+        if (task.status === 'in-progress') return { task, next: { featureId: feature.id, featureTitle: feature.title, phaseId: phase.id, phaseTitle: phase.title, taskId, taskTitle: task.title, description: task.description, files: task.files } }
+        phase.tasks[idx] = { ...task, status: 'in-progress', startedAt: new Date().toISOString() }
         if (feature.status === 'planned') {
           feature.status = 'in-progress'
         }
@@ -263,12 +294,17 @@ export function markTaskDone(taskId: string, agent?: string, note?: string, forc
       if (idx !== -1) {
         const task = phase.tasks[idx]
 
+        // Idempotent — already done
+        if (task.status === 'done') return getNextTask()
+
         if (forceReview || task.requiresReview) {
           return markTaskReview(taskId, agent)
         }
 
         const now = new Date().toISOString()
-        phase.tasks[idx] = { ...task, status: 'done', attempt: 0, doneAt: now, note: note ?? task.note }
+        // Auto-start if task was never started (elastic: pending → done works)
+        const startedAt = task.startedAt ?? now
+        phase.tasks[idx] = { ...task, status: 'done', attempt: 0, doneAt: now, startedAt, note: note ?? task.note }
         feature.updatedAt = now
 
         // Check if entire feature is now done

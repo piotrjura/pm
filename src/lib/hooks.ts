@@ -152,6 +152,7 @@ export function getStatusSummary(cwd: string): string {
 
   // === Active work — show status + scope tracking ===
   const lines: string[] = []
+  const decisions: Array<{ decision: string; reasoning?: string }> = []
 
   // Current work
   for (const feature of store.features) {
@@ -167,6 +168,10 @@ export function getStatusSummary(cwd: string): string {
           )
           lines.push(`  Task: "${task.title}" (${feature.title} > ${phase.title})`)
           lines.push(`  Progress: ${featureProgress.done}/${featureProgress.total} tasks done`)
+
+          // Collect decisions from this task and its parent feature
+          if (task.decisions?.length) decisions.push(...task.decisions)
+          if (feature.decisions?.length) decisions.push(...feature.decisions)
         }
       }
     }
@@ -174,6 +179,16 @@ export function getStatusSummary(cwd: string): string {
   for (const issue of store.issues) {
     if (issue.status !== 'done') {
       lines.push(`  Issue: "${issue.title}" [${issue.priority}]`)
+      if (issue.decisions?.length) decisions.push(...issue.decisions)
+    }
+  }
+
+  // Relevant decisions
+  if (decisions.length > 0) {
+    lines.push('')
+    lines.push('  Decisions:')
+    for (const d of decisions) {
+      lines.push(`  - ${d.decision}${d.reasoning ? ` — ${d.reasoning}` : ''}`)
     }
   }
 

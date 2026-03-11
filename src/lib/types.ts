@@ -62,12 +62,14 @@ export interface Issue {
 }
 
 export interface LogEntry {
-  taskId: string
-  taskTitle: string
-  phaseId: string
-  phaseTitle: string
-  featureId: string
-  featureTitle: string
+  taskId?: string
+  taskTitle?: string
+  phaseId?: string
+  phaseTitle?: string
+  featureId?: string
+  featureTitle?: string
+  issueId?: string
+  issueTitle?: string
   action: 'started' | 'completed' | 'error' | 'rejected' | 'reset'
   at: string
   agent?: string
