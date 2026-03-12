@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { Box, Text, useInput } from 'ink'
 import Spinner from 'ink-spinner'
 import type { Feature, Task } from '../lib/types.js'
-import { relativeDate } from '../lib/format.js'
+import { relativeDate, shortModel } from '../lib/format.js'
 
 const TASK_COLOR: Record<Task['status'], string | undefined> = {
   pending: 'gray',
@@ -51,8 +51,23 @@ export function FeatureDetail({ feature, height, focused, onBack }: FeatureDetai
       </Box>
 
       {feature.description && (
-        <Box marginBottom={1}>
-          <Text dimColor>{feature.description}</Text>
+        <Box flexDirection="column" marginBottom={1} paddingLeft={2}>
+          {feature.description.split(/(?=\d+[\.\)]\s)/).map((chunk, i) => (
+            <Text key={i} dimColor>{chunk.trim()}</Text>
+          ))}
+        </Box>
+      )}
+
+      {/* Feature-level decisions */}
+      {feature.decisions && feature.decisions.length > 0 && (
+        <Box flexDirection="column" marginBottom={1}>
+          <Text bold color="magenta">  Decisions</Text>
+          {feature.decisions.map((d, i) => (
+            <Box key={i} paddingLeft={4} flexDirection="column">
+              <Text>• {d.decision}</Text>
+              {d.reasoning && <Text dimColor>  Why: {d.reasoning}</Text>}
+            </Box>
+          ))}
         </Box>
       )}
 
@@ -118,10 +133,25 @@ export function FeatureDetail({ feature, height, focused, onBack }: FeatureDetai
                       </Box>
                     )}
 
-                    {/* ID row — shown when cursor is on this task */}
+                    {/* Task decisions — shown when cursor is on this task */}
+                    {isCursor && task.decisions && task.decisions.length > 0 && (
+                      <Box paddingLeft={3} flexDirection="column">
+                        {task.decisions.map((d, i) => (
+                          <Box key={i} flexDirection="column">
+                            <Text color="magenta">decision: {d.decision}</Text>
+                            {d.reasoning && <Text dimColor>  why: {d.reasoning}</Text>}
+                          </Box>
+                        ))}
+                      </Box>
+                    )}
+
+                    {/* ID + agent/model row — shown when cursor is on this task */}
                     {isCursor && (
-                      <Box paddingLeft={3}>
+                      <Box paddingLeft={3} gap={2}>
                         <Text dimColor>id: {task.id}</Text>
+                        {(task.agent || task.model) && (
+                          <Text dimColor>{[task.agent, task.model && shortModel(task.model)].filter(Boolean).join('/')}</Text>
+                        )}
                       </Box>
                     )}
                   </Box>

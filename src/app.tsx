@@ -1,10 +1,11 @@
-import React, { useState, useCallback, useEffect } from 'react'
+import React, { useState, useCallback, useEffect, useMemo } from 'react'
 import { Box, useApp, useInput, useStdout } from 'ink'
 import path from 'node:path'
 import { StatusBar } from './components/status-bar.js'
 import { UnifiedList } from './components/unified-list.js'
 import { FeatureDetail } from './components/feature-detail.js'
 import { IssueDetail } from './components/issue-detail.js'
+import { DecisionsList } from './components/decisions-list.js'
 import { InitScreen } from './components/init-screen.js'
 import { UpgradeScreen } from './components/upgrade-screen.js'
 import { useNavigation } from './hooks/use-navigation.js'
@@ -12,7 +13,10 @@ import { useStore } from './hooks/use-store.js'
 import { detectProjectStatus, isInitialized, ensureClaudePermission, detectUpgrade } from './lib/init.js'
 import type { UpgradeInfo } from './lib/init.js'
 import { loadStore } from './lib/store.js'
-import { ensureHooks } from './lib/hooks.js'
+import type { DecisionMatch } from './lib/store.js'
+import { ensureHooks, hasClaudeHooks } from './lib/hooks.js'
+import { ensureOpenCodePlugin, hasOpenCodePlugin } from './lib/opencode.js'
+import type { AgentUpgrade } from './lib/init.js'
 
 function setTerminalTitle(title: string) {
   process.stdout.write(`\x1b]2;${title}\x07`)
@@ -39,13 +43,24 @@ export function App() {
     if (!isInitialized()) return null
     const upgrade = detectUpgrade()
     if (!upgrade) return null
-    // Perform the upgrade immediately
+    // Perform the upgrade — update all configured agents
     const cwd = process.cwd()
-    const hookResult = ensureHooks(cwd)
-    const updatedHooks = hookResult !== 'exists'
+    const agents: AgentUpgrade[] = []
+
+    if (hasClaudeHooks(cwd)) {
+      ensureClaudePermission()
+      const r = ensureHooks(cwd)
+      agents.push({ name: 'Claude Code', result: r === 'exists' ? 'exists' : 'updated' })
+    }
+
+    if (hasOpenCodePlugin(cwd)) {
+      const r = ensureOpenCodePlugin(cwd)
+      agents.push({ name: 'OpenCode', result: r === 'exists' ? 'exists' : 'updated' })
+    }
+
     // loadStore will stamp the new version
     loadStore()
-    return { ...upgrade, updatedHooks }
+    return { ...upgrade, agents }
   })
 
   const nav = useNavigation()
@@ -69,6 +84,8 @@ export function App() {
     } else if (nav.screen.type === 'issue-detail') {
       const issue = store.store.issues.find(i => i.id === (nav.screen as { issueId: string }).issueId)
       setTerminalTitle(`pm — ${projectName} — ${issue?.title ?? 'Issue'}`)
+    } else if (nav.screen.type === 'decisions') {
+      setTerminalTitle(`pm — ${projectName} — Decisions`)
     } else {
       setTerminalTitle(`pm — ${projectName}`)
     }
@@ -105,6 +122,30 @@ export function App() {
     )
   }
 
+  // Collect all decisions from store for the decisions screen
+  const allDecisions = useMemo<DecisionMatch[]>(() => {
+    const matches: DecisionMatch[] = []
+    for (const feature of store.store.features) {
+      for (const d of feature.decisions ?? []) {
+        matches.push({ decision: d, source: { type: 'feature', featureId: feature.id, featureTitle: feature.title } })
+      }
+      for (const phase of feature.phases) {
+        for (const task of phase.tasks) {
+          for (const d of task.decisions ?? []) {
+            matches.push({ decision: d, source: { type: 'task', featureId: feature.id, featureTitle: feature.title, taskId: task.id, taskTitle: task.title } })
+          }
+        }
+      }
+    }
+    for (const issue of store.store.issues) {
+      for (const d of issue.decisions ?? []) {
+        matches.push({ decision: d, source: { type: 'issue', issueId: issue.id, issueTitle: issue.title } })
+      }
+    }
+    matches.sort((a, b) => b.decision.at.localeCompare(a.decision.at))
+    return matches
+  }, [store.store.features, store.store.issues])
+
   const bodyHeight = rows - 1
 
   return (
@@ -119,6 +160,7 @@ export function App() {
             featureProgress={store.featureProgress}
             onSelectFeature={(id, state) => nav.openFeature(id, state)}
             onSelectIssue={(id, state) => nav.openIssue(id, state)}
+            onOpenDecisions={() => nav.openDecisions()}
             initialCursor={nav.listState.cursor}
             initialPage={nav.listState.page}
             initialSearch={nav.listState.search}
@@ -141,7 +183,7 @@ export function App() {
               />
             )
           })()
-        ) : (
+        ) : nav.screen.type === 'issue-detail' ? (
           (() => {
             const issue = store.store.issues.find(i => i.id === (nav.screen as { issueId: string }).issueId)
             if (!issue) { nav.goBack(); return null }
@@ -153,7 +195,13 @@ export function App() {
               />
             )
           })()
-        )}
+        ) : nav.screen.type === 'decisions' ? (
+          <DecisionsList
+            decisions={allDecisions}
+            height={bodyHeight}
+            onBack={nav.goBack}
+          />
+        ) : null}
       </Box>
       <StatusBar screen={nav.screen} width={cols} />
     </Box>

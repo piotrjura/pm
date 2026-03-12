@@ -76,7 +76,9 @@ export function cmdRecap(args: string[] = []) {
     for (const entry of log) {
       const action = entry.action === 'started' ? '▶' : entry.action === 'completed' ? '✓' : entry.action === 'error' ? '✗' : entry.action === 'reset' ? '↺' : '←'
       const date = new Date(entry.at).toLocaleDateString()
-      lines.push(`  ${action} ${date} ${entry.featureTitle} > ${entry.taskTitle}`)
+      const meta = [entry.agent, entry.model].filter(Boolean).join('/')
+      const metaLabel = meta ? ` [${meta}]` : ''
+      lines.push(`  ${action} ${date} ${entry.featureTitle} > ${entry.taskTitle}${metaLabel}`)
       if (!brief && entry.note) lines.push(`    ${entry.note}`)
     }
     lines.push('')
@@ -110,7 +112,9 @@ function collectInProgress(features: Feature[], issues: Issue[]): string[] {
     for (const phase of feature.phases) {
       for (const task of phase.tasks) {
         if (task.status === 'in-progress') {
-          lines.push(`    → Task: "${task.title}" (${phase.title})`)
+          const meta = [task.agent, task.model].filter(Boolean).join('/')
+          const metaLabel = meta ? ` [${meta}]` : ''
+          lines.push(`    → Task: "${task.title}" (${phase.title})${metaLabel}`)
           if (task.description) lines.push(`      ${task.description}`)
           if (task.decisions?.length) {
             for (const d of task.decisions) {
@@ -124,7 +128,9 @@ function collectInProgress(features: Feature[], issues: Issue[]): string[] {
 
   for (const issue of issues) {
     if (issue.status === 'in-progress') {
-      lines.push(`  Issue: "${issue.title}" [${issue.priority}]`)
+      const meta = [issue.agent, issue.model].filter(Boolean).join('/')
+      const metaLabel = meta ? ` [${meta}]` : ''
+      lines.push(`  Issue: "${issue.title}" [${issue.priority}]${metaLabel}`)
       if (issue.decisions?.length) {
         for (const d of issue.decisions) lines.push(`    Decision: ${d.decision}`)
       }

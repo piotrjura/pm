@@ -1,20 +1,34 @@
 import { loadStore } from '../lib/store.js'
-import { STATUS_ICON } from '../lib/format.js'
+import { STATUS_ICON, PRIORITY_COLOR } from '../lib/format.js'
 
 export function cmdShow(args: string[]) {
-  const featureId = args[0]
-  if (!featureId) {
-    console.error('Usage: pm show <featureId>')
+  const id = args[0]
+  if (!id) {
+    console.error('Usage: pm show <featureId|issueId>')
     process.exit(1)
   }
 
   const store = loadStore()
-  const feature = store.features.find(f => f.id === featureId)
-  if (!feature) {
-    console.error(`Feature ${featureId} not found`)
-    process.exit(1)
+
+  // Try features first
+  const feature = store.features.find(f => f.id === id)
+  if (feature) {
+    showFeature(feature)
+    return
   }
 
+  // Try issues
+  const issue = store.issues.find(i => i.id === id)
+  if (issue) {
+    showIssue(issue)
+    return
+  }
+
+  console.error(`Not found: ${id} (checked features and issues)`)
+  process.exit(1)
+}
+
+function showFeature(feature: ReturnType<typeof loadStore>['features'][0]) {
   console.log(`[${feature.status.toUpperCase()}] ${feature.title}  [feature:${feature.id}]`)
   if (feature.description) console.log(`  ${feature.description}`)
 
@@ -42,6 +56,8 @@ export function cmdShow(args: string[]) {
       const icon = STATUS_ICON[task.status] ?? '?'
       const meta: string[] = []
       if (task.priority !== undefined && task.priority !== 3) meta.push(`P${task.priority}`)
+      if (task.agent) meta.push(task.agent)
+      if (task.model) meta.push(task.model)
       if ((task.attempt ?? 0) > 0) meta.push(`attempt ${task.attempt}`)
       if (task.doneAt) meta.push(`done ${task.doneAt.slice(0, 10)}`)
       const metaStr = meta.length > 0 ? `  ${meta.join(' ')}` : ''
@@ -57,5 +73,26 @@ export function cmdShow(args: string[]) {
       if (task.files?.length) console.log(`       files: ${task.files.join(', ')}`)
     }
     console.log()
+  }
+}
+
+function showIssue(issue: ReturnType<typeof loadStore>['issues'][0]) {
+  const typeLabel = issue.type === 'bug' ? 'BUG' : 'CHANGE'
+  console.log(`[${typeLabel}] ${issue.title}  [issue:${issue.id}]`)
+  console.log(`  Status: ${issue.status}  Priority: ${issue.priority}`)
+  if (issue.description) console.log(`  ${issue.description}`)
+  if (issue.agent || issue.model) {
+    const parts = [issue.agent, issue.model].filter(Boolean)
+    console.log(`  Agent: ${parts.join(' / ')}`)
+  }
+  console.log(`  Created: ${issue.createdAt.slice(0, 10)}`)
+
+  if (issue.decisions?.length) {
+    console.log()
+    console.log('  Decisions:')
+    for (const d of issue.decisions) {
+      console.log(`    • ${d.decision}`)
+      if (d.reasoning) console.log(`      Why: ${d.reasoning}`)
+    }
   }
 }

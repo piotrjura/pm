@@ -4,11 +4,13 @@ import { parseFlag, hasFlag } from '../lib/args.js'
 export function cmdDone(args: string[]) {
   const id = args[0]
   if (!id) {
-    console.error('Usage: pm done <taskId|issueId> [--agent <name>] [--note "what you did"]')
+    console.error('Usage: pm done <taskId|issueId> [--agent <name>] [--instance <id>] [--model <name>] [--note "what you did"]')
     process.exit(1)
   }
 
   const agent = parseFlag(args, '--agent')
+  const instance = parseFlag(args, '--instance')
+  const model = parseFlag(args, '--model')
   const note = parseFlag(args, '--note')
   const forceReview = hasFlag(args, '--review')
 
@@ -17,7 +19,7 @@ export function cmdDone(args: string[]) {
   const store = loadStore()
   const issue = store.issues.find(i => i.id === issueId)
   if (issue) {
-    const result = markIssueDone(issueId, agent, note)
+    const result = markIssueDone(issueId, agent, note, model, instance)
     if (result && result.status === 'done' && issue.status === 'done') {
       console.log(`Already done: issue ${issueId}`)
     } else {
@@ -27,7 +29,7 @@ export function cmdDone(args: string[]) {
     return
   }
 
-  const nextTask = markTaskDone(id, agent, note, forceReview)
+  const nextTask = markTaskDone(id, agent, note, forceReview, model, instance)
 
   if (forceReview) {
     console.log(`Submitted for review: task ${id}`)

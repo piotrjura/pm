@@ -14,9 +14,14 @@ export function cmdLog(args: string[]) {
   for (const entry of entries) {
     const time = new Date(entry.at).toLocaleString()
     const icon = entry.action === 'completed' ? '✓' : entry.action === 'started' ? '▶' : entry.action === 'reset' ? '↺' : '✗'
-    const agent = entry.agent ? ` [${entry.agent}]` : ''
-    console.log(`${icon} ${time}${agent}`)
-    console.log(`  ${entry.featureTitle} › ${entry.phaseTitle} › ${entry.taskTitle}`)
+    const meta = [entry.agent, entry.model].filter(Boolean).join('/')
+    const metaLabel = meta ? ` [${meta}]` : ''
+    console.log(`${icon} ${time}${metaLabel}`)
+    if (entry.issueTitle) {
+      console.log(`  Issue: ${entry.issueTitle}`)
+    } else {
+      console.log(`  ${entry.featureTitle} › ${entry.phaseTitle} › ${entry.taskTitle}`)
+    }
     if (entry.note) console.log(`  Note: ${entry.note}`)
     console.log()
   }

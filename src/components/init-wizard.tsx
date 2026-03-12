@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { ensureClaudePermission } from '../lib/init.js'
 import { ensureHooks } from '../lib/hooks.js'
+import { ensureOpenCodePlugin, hasOpenCodePlugin } from '../lib/opencode.js'
 import { PM_VERSION } from '../lib/version.js'
 import { Logo } from './logo.js'
 const PERM_RULE = 'Bash(pm *)'
@@ -16,9 +17,9 @@ interface StepDef {
 }
 
 const STEPS: StepDef[] = [
-  { id: 'permissions', title: 'Whitelist pm commands' },
-  { id: 'hooks', title: 'Set up Claude Code hooks' },
   { id: 'store', title: 'Initialize data store' },
+  { id: 'claude-code', title: 'Set up Claude Code' },
+  { id: 'opencode', title: 'Set up OpenCode' },
 ]
 
 interface StepResult {
@@ -56,42 +57,49 @@ export function InitWizard() {
         const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
         const hooks = settings.hooks?.PreToolUse ?? []
         return hooks.some((c: { hooks?: Array<{ command?: string }> }) =>
-          c.hooks?.some(h => h.command?.startsWith('pm hook'))
+          c.hooks?.some(h => h.command?.startsWith('pm hook') || h.command?.startsWith('PM_AGENT='))
         )
       } catch { return false }
     })()
 
-    return { pmDir, dataFile, dataExists, hasPermission, hasHooks }
+    const hasOpenCode = hasOpenCodePlugin(projectDir)
+
+    return { pmDir, dataFile, dataExists, hasPermission, hasHooks, hasOpenCode }
   })
 
   function isAlreadyDone(stepId: string): boolean {
     switch (stepId) {
-      case 'permissions': return initial.hasPermission
-      case 'hooks': return initial.hasHooks
       case 'store': return initial.dataExists
+      case 'claude-code': return initial.hasPermission && initial.hasHooks
+      case 'opencode': return initial.hasOpenCode
       default: return false
     }
   }
 
   function executeStep(stepId: string): StepResult {
     switch (stepId) {
-      case 'permissions': {
-        const r = ensureClaudePermission()
-        return r === 'exists'
-          ? { status: 'already', note: 'already configured' }
-          : { status: 'done', note: `added "${PERM_RULE}"` }
-      }
-      case 'hooks': {
-        const r = ensureHooks(projectDir)
-        return r === 'exists'
-          ? { status: 'already', note: 'already configured' }
-          : { status: 'done', note: `${r} hooks in .claude/settings.json` }
-      }
       case 'store':
         if (initial.dataExists) return { status: 'already', note: 'already exists' }
         if (!existsSync(initial.pmDir)) mkdirSync(initial.pmDir, { recursive: true })
         writeFileSync(initial.dataFile, JSON.stringify({ features: [], issues: [], log: [] }, null, 2))
         return { status: 'done', note: 'created' }
+      case 'claude-code': {
+        const permResult = ensureClaudePermission()
+        const hookResult = ensureHooks(projectDir)
+        if (permResult === 'exists' && hookResult === 'exists') {
+          return { status: 'already', note: 'already configured' }
+        }
+        const parts: string[] = []
+        if (permResult === 'added') parts.push('permissions')
+        if (hookResult !== 'exists') parts.push('hooks')
+        return { status: 'done', note: `${parts.join(' + ')} configured` }
+      }
+      case 'opencode': {
+        const r = ensureOpenCodePlugin(projectDir)
+        return r === 'exists'
+          ? { status: 'already', note: 'already configured' }
+          : { status: 'done', note: `plugin ${r} at .opencode/plugins/pm.ts` }
+      }
       default:
         return { status: 'done', note: '' }
     }
@@ -140,7 +148,7 @@ export function InitWizard() {
         </Box>
         <Box flexDirection="column">
           <Text bold>pm <Text dimColor>v{PM_VERSION}</Text></Text>
-          <Text dimColor>Project Manager for Claude Code</Text>
+          <Text dimColor>project manager for agents</Text>
           <Text dimColor>{projectDir}</Text>
         </Box>
       </Box>
@@ -224,23 +232,12 @@ function StepDetail({ stepId, initial }: {
   stepId: string
   initial: {
     hasPermission: boolean
+    hasHooks: boolean
+    hasOpenCode: boolean
     dataExists: boolean
   }
 }) {
   switch (stepId) {
-    case 'permissions':
-      return initial.hasPermission ? (
-        <Box paddingLeft={3}>
-          <Text dimColor>{'↳'} Permission already present</Text>
-        </Box>
-      ) : (
-        <Box flexDirection="column" paddingLeft={3}>
-          <Text color="yellow">{'⚠'} ~/.claude/settings.json will be modified</Text>
-          <Text dimColor>This adds <Text color="white">{`"${PERM_RULE}"`}</Text> to Claude Code permissions</Text>
-          <Text dimColor>so pm commands run without manual approval.</Text>
-        </Box>
-      )
-
     case 'store':
       return initial.dataExists ? (
         <Box paddingLeft={3}>
@@ -249,6 +246,30 @@ function StepDetail({ stepId, initial }: {
       ) : (
         <Box paddingLeft={3}>
           <Text dimColor>{'↳'} .pm/data.json stores your features, tasks, and issues.</Text>
+        </Box>
+      )
+
+    case 'claude-code':
+      return initial.hasPermission && initial.hasHooks ? (
+        <Box paddingLeft={3}>
+          <Text dimColor>{'↳'} Permissions and hooks already configured</Text>
+        </Box>
+      ) : (
+        <Box flexDirection="column" paddingLeft={3}>
+          <Text dimColor>{'↳'} Adds hooks to .claude/settings.json and whitelists pm commands.</Text>
+          <Text dimColor>  Blocks edits without active tasks, injects context, tracks scope.</Text>
+        </Box>
+      )
+
+    case 'opencode':
+      return initial.hasOpenCode ? (
+        <Box paddingLeft={3}>
+          <Text dimColor>{'↳'} Plugin already exists at .opencode/plugins/pm.ts</Text>
+        </Box>
+      ) : (
+        <Box flexDirection="column" paddingLeft={3}>
+          <Text dimColor>{'↳'} Generates .opencode/plugins/pm.ts with hooks for edit blocking,</Text>
+          <Text dimColor>  file tracking, and context injection.</Text>
         </Box>
       )
 

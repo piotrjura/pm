@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react'
 import { Box, Text, useInput } from 'ink'
 import Spinner from 'ink-spinner'
 import type { Feature, Issue } from '../lib/types.js'
-import { relativeDate, progressBar, truncate, PRIORITY_COLOR } from '../lib/format.js'
+import { relativeDate, progressBar, truncate, PRIORITY_COLOR, shortModel } from '../lib/format.js'
 
 const PAGE_SIZE = 20
 
@@ -46,6 +46,7 @@ interface UnifiedListProps {
   onAddFeature: (type: 'feature' | 'fix') => void
   onDeleteFeature: (id: string) => void
   onAddIssue: (title: string) => void
+  onOpenDecisions: () => void
   onDeleteIssue: (id: string) => void
   initialCursor?: number
   initialPage?: number
@@ -60,6 +61,7 @@ export function UnifiedList({
   featureProgress,
   onSelectFeature,
   onSelectIssue,
+  onOpenDecisions,
   onDeleteFeature,
   onDeleteIssue,
   initialCursor = 0,
@@ -117,6 +119,7 @@ export function UnifiedList({
       if (item?.kind === 'feature') onSelectFeature(item.feature.id, state)
       else if (item?.kind === 'issue') onSelectIssue(item.issue.id, state)
     }
+    else if (input === 'w') { onOpenDecisions() }
     else if (input === 'd' && pageItems.length > 0) {
       const item = pageItems[cursor]
       if (item?.kind === 'feature') {
@@ -137,6 +140,10 @@ export function UnifiedList({
   const doneIssues = issues.filter(i => i.status === 'done').length
   const openIssues = issues.filter(i => i.status !== 'done').length
   const totalIssues = issues.length
+  const totalDecisions = features.reduce((sum, f) => {
+    return sum + (f.decisions?.length ?? 0) +
+      f.phases.reduce((s, p) => s + p.tasks.reduce((t, task) => t + (task.decisions?.length ?? 0), 0), 0)
+  }, 0) + issues.reduce((sum, i) => sum + (i.decisions?.length ?? 0), 0)
   const showSearchBar = searchMode || !!search
 
   return (
@@ -153,6 +160,9 @@ export function UnifiedList({
                 ? <Text>  {doneIssues}/{totalIssues} changes <Text color="red">({openIssues} open)</Text></Text>
                 : <Text>  {doneIssues}/{totalIssues} changes</Text>
             ) : ''}
+            {totalDecisions > 0 && (
+              <Text color="magenta">  {totalDecisions} decisions</Text>
+            )}
           </Text>
           {totalPages > 1 && (
             <Text dimColor>  pg {clampedPage + 1}/{totalPages}</Text>
@@ -192,6 +202,8 @@ export function UnifiedList({
             const isDone = f.status === 'done'
             const typeColor = f.type === 'fix' ? 'red' : 'blue'
             const typeLabel = (f.type === 'fix' ? '[fix]' : '[feat]').padEnd(9)
+            const decisionCount = (f.decisions?.length ?? 0) +
+              f.phases.reduce((sum, p) => sum + p.tasks.reduce((s, t) => s + (t.decisions?.length ?? 0), 0), 0)
             const activeTask = isActive
               ? f.phases.flatMap(p => p.tasks).find(t => t.status === 'in-progress')
               : undefined
@@ -240,6 +252,9 @@ export function UnifiedList({
                         ? <Text dimColor>done {relativeDate(f.doneAt)}</Text>
                         : <Text dimColor>{relativeDate(f.updatedAt)}</Text>
                       }
+                      {decisionCount > 0 && (
+                        <Text color="magenta">  {decisionCount} decision{decisionCount !== 1 ? 's' : ''}</Text>
+                      )}
                     </Text>
                   ) : (
                     <Text dimColor>no tasks  {relativeDate(f.updatedAt)}</Text>
@@ -249,6 +264,9 @@ export function UnifiedList({
                   <Box paddingLeft={14}>
                     <Text color="yellow"><Spinner type="dots" /></Text>
                     <Text color="yellow"> {truncate(activeTask.title, titleWidth - 2)}</Text>
+                    {(activeTask.agent || activeTask.model) && (
+                      <Text dimColor>  {[activeTask.agent, activeTask.model && shortModel(activeTask.model)].filter(Boolean).join('/')}</Text>
+                    )}
                   </Box>
                 )}
               </Box>
@@ -261,6 +279,7 @@ export function UnifiedList({
           const prioColor = PRIORITY_COLOR[iss.priority]
           const issueType = iss.type ?? 'bug'
           const issueColor = issueType === 'change' ? 'cyan' : 'red'
+          const issueDecisions = iss.decisions?.length ?? 0
           return (
             <Box key={iss.id} flexDirection="column">
               <Box>
@@ -277,9 +296,16 @@ export function UnifiedList({
                 <Box width={1}><Text> </Text></Box>
                 <Box flexGrow={1}>
                   <Text bold={isCursor} color={isIssueDone ? 'gray' : isCursor ? 'white' : undefined} strikethrough={isIssueDone} wrap="truncate">
-                    {truncate(iss.title, titleWidth - iss.priority.length - relativeDate(iss.createdAt).length - 4)}
+                    {truncate(iss.title, titleWidth - iss.priority.length - relativeDate(iss.createdAt).length - (iss.agent ? iss.agent.length + 2 : 0) - (iss.model ? shortModel(iss.model).length + 1 : 0) - (issueDecisions > 0 ? 6 : 0) - 4)}
                   </Text>
-                  <Text dimColor>  {iss.priority}  {relativeDate(iss.createdAt)}</Text>
+                  <Text dimColor>  {iss.priority}</Text>
+                  {(iss.agent || iss.model) && (
+                    <Text dimColor>  {[iss.agent, iss.model && shortModel(iss.model)].filter(Boolean).join('/')}</Text>
+                  )}
+                  {issueDecisions > 0 && (
+                    <Text color="magenta">  {issueDecisions}d</Text>
+                  )}
+                  <Text dimColor>  {relativeDate(iss.createdAt)}</Text>
                 </Box>
               </Box>
             </Box>

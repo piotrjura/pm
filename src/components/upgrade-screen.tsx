@@ -24,7 +24,7 @@ export function UpgradeScreen({ info, onContinue, onQuit }: UpgradeScreenProps) 
         </Box>
         <Box flexDirection="column">
           <Text bold>pm <Text dimColor>v{info.toVersion}</Text></Text>
-          <Text dimColor>Project Manager for Claude Code</Text>
+          <Text dimColor>project manager for agents</Text>
         </Box>
       </Box>
 
@@ -37,12 +37,9 @@ export function UpgradeScreen({ info, onContinue, onQuit }: UpgradeScreenProps) 
 
       <Box flexDirection="column" marginTop={1}>
         <Text dimColor>What changed:</Text>
-        {info.updatedHooks && (
-          <Text>  <Text color="green">{'✓'}</Text> Claude Code hooks updated</Text>
-        )}
-        {!info.updatedHooks && (
-          <Text>  <Text color="green">{'✓'}</Text> Version tracked (no config changes needed)</Text>
-        )}
+        {info.agents.map((agent) => (
+          <Text key={agent.name}>  <Text color="green">{'✓'}</Text> {agent.name} {agent.result === 'updated' ? 'updated' : 'already current'}</Text>
+        ))}
         <Text>  <Text color="green">{'✓'}</Text> Version stamped in .pm/data.json</Text>
       </Box>
 

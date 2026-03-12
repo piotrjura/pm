@@ -23,6 +23,7 @@ function getHints(screen: Screen): Hint[] {
         { prefix: '↑↓', label: 'navigate', keyLen: 0 },
         { prefix: '⏎', label: 'open', keyLen: 0 },
         { label: '/search', keyLen: 1 },
+        { label: 'why', keyLen: 1 },
         { label: '[]page', keyLen: 2 },
         { label: 'delete', keyLen: 1 },
         { label: 'quit', keyLen: 1 },
@@ -35,6 +36,13 @@ function getHints(screen: Screen): Hint[] {
       ]
     case 'issue-detail':
       return [
+        { prefix: 'esc', label: 'back', keyLen: 0 },
+        { label: 'quit', keyLen: 1 },
+      ]
+    case 'decisions':
+      return [
+        { prefix: '↑↓', label: 'navigate', keyLen: 0 },
+        { label: '/search', keyLen: 1 },
         { prefix: 'esc', label: 'back', keyLen: 0 },
         { label: 'quit', keyLen: 1 },
       ]

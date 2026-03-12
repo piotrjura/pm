@@ -39,7 +39,9 @@ export function cmdRetry(args: string[]) {
     .slice(0, 3)
     .map(e => e.note!)
 
-  const retriedTask = markTaskRetry(taskId, undefined, note)
+  const agent = parseFlag(args, '--agent')
+  const model = parseFlag(args, '--model')
+  const retriedTask = markTaskRetry(taskId, agent, note, model)
   if (!retriedTask) {
     console.error(`Failed to retry task ${taskId}`)
     process.exit(1)

@@ -1,35 +1,70 @@
 import { loadStore } from '../lib/store.js'
 import { ensureClaudePermission } from '../lib/init.js'
-import { ensureHooks } from '../lib/hooks.js'
+import { ensureHooks, hasClaudeHooks } from '../lib/hooks.js'
+import { ensureOpenCodePlugin, hasOpenCodePlugin } from '../lib/opencode.js'
+import { hasFlag } from '../lib/args.js'
 
-function cmdInitNonInteractive() {
+function cmdInitNonInteractive(args: string[]) {
   const cwd = process.cwd()
-  // Step 1: Permissions
-  const permResult = ensureClaudePermission()
-  // Step 2: Hooks
-  const hookResult = ensureHooks(cwd)
-  // Step 3: Data store
+  const force = hasFlag(args, '--force')
+  const explicitClaudeCode = hasFlag(args, '--claude-code')
+  const explicitOpenCode = hasFlag(args, '--opencode')
+  const hasExplicitAgent = explicitClaudeCode || explicitOpenCode
+
+  // When --force without explicit agent flags, auto-detect configured agents
+  const setupClaudeCode = hasExplicitAgent ? (!explicitOpenCode || explicitClaudeCode) : (force ? hasClaudeHooks(cwd) || true : true)
+  const setupOpenCode = explicitOpenCode || (force && !hasExplicitAgent && hasOpenCodePlugin(cwd))
+
+  // Step 1: Data store (always)
   loadStore()
 
-  console.log(`Initialized pm in ${cwd}`)
+  // Step 2: Claude Code
+  let permResult: 'added' | 'exists' | undefined
+  let hookResult: 'added' | 'updated' | 'exists' | undefined
+
+  if (setupClaudeCode) {
+    permResult = ensureClaudePermission()
+    hookResult = ensureHooks(cwd, force)
+  }
+
+  // Step 3: OpenCode
+  let pluginResult: 'added' | 'updated' | 'exists' | undefined
+  if (setupOpenCode) {
+    pluginResult = ensureOpenCodePlugin(cwd, force)
+  }
+
+  console.log(`${force ? 'Reinitialized' : 'Initialized'} pm in ${cwd}`)
   console.log()
   console.log('Setup:')
-  console.log(`  \u2713 permissions          ${permResult === 'added' ? 'added "Bash(pm *)"' : 'already allows "Bash(pm *)"'}`)
-  console.log(`  \u2713 hooks                ${hookResult === 'exists' ? 'already configured' : hookResult === 'added' ? 'added to .claude/settings.json' : 'updated in .claude/settings.json'}`)
-  console.log(`  \u2713 .pm/data.json       created`)
+  console.log(`  \u2713 .pm/data.json       ${force ? 'ok' : 'created'}`)
+
+  if (setupClaudeCode) {
+    console.log(`  \u2713 claude-code         ${permResult === 'added' ? 'permissions added' : 'permissions ok'}, hooks ${hookResult}`)
+  }
+
+  if (setupOpenCode) {
+    console.log(`  \u2713 opencode            plugin ${pluginResult}`)
+  }
+
   console.log()
-  console.log('Hooks:')
-  console.log('  PreToolUse (Edit|Write) — blocks edits without active task/issue')
-  console.log('  UserPromptSubmit        — injects active task context')
-  console.log()
-  console.log('Next steps:')
-  console.log('  pm add-feature "My feature" --description "..."')
-  console.log('  pm next')
+  if (!force) {
+    console.log('Next steps:')
+    console.log('  pm add-feature "My feature" --description "..."')
+    console.log('  pm next')
+  }
 }
 
-export async function cmdInit() {
+export async function cmdInit(args: string[] = []) {
+  const force = hasFlag(args, '--force')
+
+  // --force skips the wizard — direct non-interactive overwrite
+  if (force) {
+    cmdInitNonInteractive(args)
+    return
+  }
+
   // Interactive TUI wizard when running in a terminal
-  if (process.stdin.isTTY) {
+  if (process.stdin.isTTY && !hasFlag(args, '--opencode') && !hasFlag(args, '--claude-code')) {
     const { render } = await import('ink')
     const { createElement } = await import('react')
     const { InitWizard } = await import('../components/init-wizard.js')
@@ -38,6 +73,6 @@ export async function cmdInit() {
     return
   }
 
-  // Non-interactive fallback (CI, tests, piped stdin)
-  cmdInitNonInteractive()
+  // Non-interactive (CI, tests, piped stdin, or explicit flags)
+  cmdInitNonInteractive(args)
 }

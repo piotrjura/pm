@@ -12,10 +12,15 @@ export interface ProjectStatus {
   projectDir: string
 }
 
+export interface AgentUpgrade {
+  name: string
+  result: 'updated' | 'exists'
+}
+
 export interface UpgradeInfo {
   fromVersion: string
   toVersion: string
-  updatedHooks: boolean
+  agents: AgentUpgrade[]
 }
 
 export function detectProjectStatus(): ProjectStatus {

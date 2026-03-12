@@ -1,7 +1,7 @@
 import React from 'react'
 import { Box, Text, useInput } from 'ink'
 import type { Issue } from '../lib/types.js'
-import { relativeDate, PRIORITY_COLOR } from '../lib/format.js'
+import { relativeDate, PRIORITY_COLOR, shortModel } from '../lib/format.js'
 
 interface IssueDetailProps {
   issue: Issue
@@ -40,6 +40,12 @@ export function IssueDetail({ issue, height, onBack }: IssueDetailProps) {
           <Text color={PRIORITY_COLOR[issue.priority]}>{issue.priority}</Text>
         </Text>
         <Text dimColor>created {relativeDate(issue.createdAt)}</Text>
+        {(issue.agent || issue.model) && (
+          <Text>
+            <Text dimColor>agent </Text>
+            <Text>{[issue.agent, issue.model && shortModel(issue.model)].filter(Boolean).join('/')}</Text>
+          </Text>
+        )}
       </Box>
 
       {/* Description */}
@@ -47,6 +53,20 @@ export function IssueDetail({ issue, height, onBack }: IssueDetailProps) {
         <Box flexDirection="column" marginBottom={1}>
           {issue.description.split(/(?=\d+[\.\)]\s)/).map((chunk, i) => (
             <Text key={i} dimColor>{chunk.trim()}</Text>
+          ))}
+        </Box>
+      )}
+
+      {/* Decisions */}
+      {issue.decisions && issue.decisions.length > 0 && (
+        <Box flexDirection="column" marginBottom={1}>
+          <Text bold>Decisions</Text>
+          {issue.decisions.map((d, i) => (
+            <Box key={i} flexDirection="column" paddingLeft={2} marginTop={i > 0 ? 1 : 0}>
+              <Text>• {d.decision}</Text>
+              {d.reasoning && <Text dimColor>  Why: {d.reasoning}</Text>}
+              <Text dimColor>  ({new Date(d.at).toLocaleDateString()})</Text>
+            </Box>
           ))}
         </Box>
       )}

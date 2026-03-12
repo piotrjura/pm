@@ -7,6 +7,7 @@ import { PM_VERSION } from './version.js'
 const PM_DIR = join(process.cwd(), '.pm')
 const DATA_FILE = join(PM_DIR, 'data.json')
 
+
 function ensureDir() {
   if (!existsSync(PM_DIR)) {
     mkdirSync(PM_DIR, { recursive: true })
@@ -82,7 +83,7 @@ export function setFeaturePhases(featureId: string, phases: Phase[]) {
 
 // Issue CRUD
 
-export function addIssue(title: string, priority: Issue['priority'] = 'medium', description?: string, type: Issue['type'] = 'change'): Issue {
+export function addIssue(title: string, priority: Issue['priority'] = 'medium', description?: string, type: Issue['type'] = 'change', agent?: string, instance?: string, model?: string): Issue {
   const store = loadStore()
   const issue: Issue = {
     id: nanoid(8),
@@ -91,6 +92,9 @@ export function addIssue(title: string, priority: Issue['priority'] = 'medium', 
     description,
     status: 'triage',
     priority,
+    agent,
+    instance,
+    model,
     createdAt: new Date().toISOString(),
   }
   store.issues.push(issue)
@@ -114,29 +118,29 @@ export function deleteIssue(id: string) {
 }
 
 /** Start an issue — transitions to in-progress from any non-done state. Idempotent if already in-progress. */
-export function markIssueStarted(issueId: string, agent?: string): Issue | null {
+export function markIssueStarted(issueId: string, agent?: string, model?: string, instance?: string): Issue | null {
   const store = loadStore()
   const idx = store.issues.findIndex(i => i.id === issueId)
   if (idx === -1) return null
   const issue = store.issues[idx]
   if (issue.status === 'in-progress') return issue // already started
   if (issue.status === 'done') return null // can't start a done issue
-  store.issues[idx] = { ...issue, status: 'in-progress' }
+  store.issues[idx] = { ...issue, status: 'in-progress', agent, instance, model }
   saveStore(store)
-  appendLog({ issueId, issueTitle: issue.title, action: 'started', agent })
+  appendLog({ issueId, issueTitle: issue.title, action: 'started', agent, model })
   return store.issues[idx]
 }
 
 /** Mark an issue done — works from any state. Auto-starts if needed. Idempotent if already done. */
-export function markIssueDone(issueId: string, agent?: string, note?: string): Issue | null {
+export function markIssueDone(issueId: string, agent?: string, note?: string, model?: string, instance?: string): Issue | null {
   const store = loadStore()
   const idx = store.issues.findIndex(i => i.id === issueId)
   if (idx === -1) return null
   const issue = store.issues[idx]
   if (issue.status === 'done') return issue // already done, idempotent
-  store.issues[idx] = { ...issue, status: 'done' }
+  store.issues[idx] = { ...issue, status: 'done', agent: agent ?? issue.agent, instance: instance ?? issue.instance, model: model ?? issue.model }
   saveStore(store)
-  appendLog({ issueId, issueTitle: issue.title, action: 'completed', agent, note })
+  appendLog({ issueId, issueTitle: issue.title, action: 'completed', agent, note, model })
   return store.issues[idx]
 }
 
@@ -239,7 +243,7 @@ export function getNextTask(): NextTask | null {
 
 // Mark a task started — finds task by id across all features
 
-export function markTaskStarted(taskId: string, agent?: string): { task: Task; next: NextTask } | null {
+export function markTaskStarted(taskId: string, agent?: string, model?: string, instance?: string): { task: Task; next: NextTask } | null {
   const store = loadStore()
   for (const feature of store.features) {
     for (const phase of feature.phases) {
@@ -249,7 +253,7 @@ export function markTaskStarted(taskId: string, agent?: string): { task: Task; n
         // Don't restart done or already in-progress tasks
         if (task.status === 'done') return null
         if (task.status === 'in-progress') return { task, next: { featureId: feature.id, featureTitle: feature.title, phaseId: phase.id, phaseTitle: phase.title, taskId, taskTitle: task.title, description: task.description, files: task.files } }
-        phase.tasks[idx] = { ...task, status: 'in-progress', startedAt: new Date().toISOString() }
+        phase.tasks[idx] = { ...task, status: 'in-progress', startedAt: new Date().toISOString(), agent, instance, model }
         if (feature.status === 'planned') {
           feature.status = 'in-progress'
         }
@@ -264,6 +268,7 @@ export function markTaskStarted(taskId: string, agent?: string): { task: Task; n
           featureTitle: feature.title,
           action: 'started',
           agent,
+          model,
         })
         return {
           task: phase.tasks[idx],
@@ -286,7 +291,7 @@ export function markTaskStarted(taskId: string, agent?: string): { task: Task; n
 
 // Mark a task done — finds task by id across all features, auto-advances feature status
 
-export function markTaskDone(taskId: string, agent?: string, note?: string, forceReview = false): NextTask | null {
+export function markTaskDone(taskId: string, agent?: string, note?: string, forceReview = false, model?: string, instance?: string): NextTask | null {
   const store = loadStore()
   for (const feature of store.features) {
     for (const phase of feature.phases) {
@@ -304,7 +309,7 @@ export function markTaskDone(taskId: string, agent?: string, note?: string, forc
         const now = new Date().toISOString()
         // Auto-start if task was never started (elastic: pending → done works)
         const startedAt = task.startedAt ?? now
-        phase.tasks[idx] = { ...task, status: 'done', attempt: 0, doneAt: now, startedAt, note: note ?? task.note }
+        phase.tasks[idx] = { ...task, status: 'done', attempt: 0, doneAt: now, startedAt, note: note ?? task.note, agent: agent ?? task.agent, instance: instance ?? task.instance, model: model ?? task.model }
         feature.updatedAt = now
 
         // Check if entire feature is now done
@@ -322,6 +327,7 @@ export function markTaskDone(taskId: string, agent?: string, note?: string, forc
           featureTitle: feature.title,
           action: 'completed',
           agent,
+          model,
           note,
           files: task.files,
         })
@@ -335,13 +341,13 @@ export function markTaskDone(taskId: string, agent?: string, note?: string, forc
 
 // Mark task as error
 
-export function markTaskError(taskId: string, agent?: string, note?: string): NextTask | null {
+export function markTaskError(taskId: string, agent?: string, note?: string, model?: string): NextTask | null {
   const store = loadStore()
   for (const feature of store.features) {
     for (const phase of feature.phases) {
       const idx = phase.tasks.findIndex(t => t.id === taskId)
       if (idx !== -1) {
-        phase.tasks[idx] = { ...phase.tasks[idx], status: 'error' }
+        phase.tasks[idx] = { ...phase.tasks[idx], status: 'error', model: model ?? phase.tasks[idx].model }
         feature.updatedAt = new Date().toISOString()
         saveStore(store)
         appendLog({
@@ -364,7 +370,7 @@ export function markTaskError(taskId: string, agent?: string, note?: string): Ne
 
 // Re-queue failed/error task: increment attempt, set in-progress, return as NextTask
 
-export function markTaskRetry(taskId: string, agent?: string, note?: string): NextTask | null {
+export function markTaskRetry(taskId: string, agent?: string, note?: string, model?: string, instance?: string): NextTask | null {
   const store = loadStore()
   for (const feature of store.features) {
     for (const phase of feature.phases) {
@@ -372,7 +378,7 @@ export function markTaskRetry(taskId: string, agent?: string, note?: string): Ne
       if (idx !== -1) {
         const task = phase.tasks[idx]
         const attempt = (task.attempt ?? 0) + 1
-        phase.tasks[idx] = { ...task, status: 'in-progress', attempt }
+        phase.tasks[idx] = { ...task, status: 'in-progress', attempt, agent, instance, model }
         feature.updatedAt = new Date().toISOString()
         saveStore(store)
         appendLog({
@@ -682,6 +688,7 @@ export function resetErrorTasks(): ResetResult {
 
   return { tasksReset, featuresReverted }
 }
+
 
 /** Delete features that are draft with no phases. Returns deleted features. */
 export function deleteEmptyDraftFeatures(): Array<{ featureId: string; featureTitle: string }> {

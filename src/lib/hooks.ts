@@ -1,12 +1,29 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join, relative } from 'node:path'
-import type { DataStore } from './types.js'
+import type { DataStore, Decision } from './types.js'
 
 const PM_DATA = (cwd: string) => join(cwd, '.pm', 'data.json')
 const SESSION_FILE = (cwd: string) => join(cwd, '.pm', 'session.json')
+const IDENTITY_FILE = (cwd: string) => join(cwd, '.pm', 'identity.json')
 
 // Scope warning thresholds
 const SCOPE_WARN_FILES = 4 // warn when this many unique files edited under one task
+
+// Words to ignore when matching prompt text against decisions
+const STOP_WORDS = new Set([
+  'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+  'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+  'should', 'may', 'might', 'can', 'shall', 'to', 'of', 'in', 'for',
+  'on', 'with', 'at', 'by', 'from', 'as', 'into', 'through', 'during',
+  'before', 'after', 'and', 'but', 'or', 'nor', 'not', 'so', 'yet',
+  'if', 'then', 'than', 'that', 'this', 'it', 'its', 'i', 'we', 'you',
+  'he', 'she', 'they', 'me', 'us', 'him', 'her', 'them', 'my', 'our',
+  'your', 'his', 'their', 'what', 'which', 'who', 'when', 'where', 'how',
+  'all', 'each', 'every', 'both', 'few', 'more', 'most', 'other', 'some',
+  'such', 'no', 'only', 'same', 'just', 'also', 'very', 'use', 'run',
+  'make', 'let', 'get', 'set', 'add', 'new', 'now', 'want', 'need',
+  'like', 'change', 'don', 'doesn', 'didn', 'won', 'wouldn', 'shouldn',
+])
 
 interface EditSession {
   /** ID of the active task or issue when tracking started */
@@ -28,8 +45,10 @@ interface ClaudeSettings {
   [key: string]: unknown
 }
 
-/** Check if pm has any active work (in-progress task or non-done issue). */
-export function hasActiveWork(cwd: string): { active: boolean; summary?: string } {
+/** Check if pm has any active work (in-progress task or non-done issue).
+ *  When `agent` is provided, only considers work owned by that agent or unowned work.
+ *  When `instance` is also provided, narrows to that specific instance. */
+export function hasActiveWork(cwd: string, agent?: string, instance?: string): { active: boolean; summary?: string } {
   const dataPath = PM_DATA(cwd)
   if (!existsSync(dataPath)) return { active: true } // pm not initialized, don't block
 
@@ -44,7 +63,7 @@ export function hasActiveWork(cwd: string): { active: boolean; summary?: string 
   for (const feature of store.features) {
     for (const phase of feature.phases) {
       for (const task of phase.tasks) {
-        if (task.status === 'in-progress') {
+        if (task.status === 'in-progress' && matchesIdentity(task, agent, instance)) {
           return { active: true, summary: `task: ${task.title} (${feature.title})` }
         }
       }
@@ -53,7 +72,7 @@ export function hasActiveWork(cwd: string): { active: boolean; summary?: string 
 
   // Check for non-done issues (add-issue is the "log work" step)
   for (const issue of store.issues) {
-    if (issue.status !== 'done') {
+    if (issue.status !== 'done' && matchesIdentity(issue, agent, instance)) {
       return { active: true, summary: `issue: ${issue.title}` }
     }
   }
@@ -61,19 +80,126 @@ export function hasActiveWork(cwd: string): { active: boolean; summary?: string 
   return { active: false }
 }
 
-/** Get the current active task/issue ID, or null. */
-function getActiveId(store: DataStore): { id: string; type: 'task' | 'issue' } | null {
+/** Check if a task/issue belongs to the given agent+instance.
+ *  - No agent filter → matches all
+ *  - Agent matches + no instance filter → matches
+ *  - Agent matches + instance matches → matches
+ *  - Unowned work (no agent on item) → matches any agent (backward compat) */
+function matchesIdentity(item: { agent?: string; instance?: string }, agent?: string, instance?: string): boolean {
+  if (!agent) return true                    // no filter
+  if (!item.agent) return true               // unowned work — any agent can claim
+  if (item.agent !== agent) return false      // different agent — reject
+  if (!instance) return true                 // same agent, no instance filter
+  if (!item.instance) return true            // same agent, item has no instance — allow
+  return item.instance === instance          // same agent, match instance
+}
+
+/** Get the current active task/issue ID, or null.
+ *  When `agent`/`instance` are provided, only considers matching work. */
+function getActiveId(store: DataStore, agent?: string, instance?: string): { id: string; type: 'task' | 'issue' } | null {
   for (const feature of store.features) {
     for (const phase of feature.phases) {
       for (const task of phase.tasks) {
-        if (task.status === 'in-progress') return { id: task.id, type: 'task' }
+        if (task.status === 'in-progress' && matchesIdentity(task, agent, instance)) return { id: task.id, type: 'task' }
       }
     }
   }
   for (const issue of store.issues) {
-    if (issue.status !== 'done') return { id: issue.id, type: 'issue' }
+    if (issue.status !== 'done' && matchesIdentity(issue, agent, instance)) return { id: issue.id, type: 'issue' }
   }
   return null
+}
+
+/** Tokenize text into meaningful words for matching. */
+function tokenize(text: string): Set<string> {
+  return new Set(
+    text.toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, ' ')
+      .split(/\s+/)
+      .filter(w => w.length > 2 && !STOP_WORDS.has(w))
+  )
+}
+
+/** Collect ALL decisions from the entire store. */
+function collectAllDecisions(store: DataStore): Array<Decision & { source: string }> {
+  const all: Array<Decision & { source: string }> = []
+  for (const feature of store.features) {
+    if (feature.decisions?.length) {
+      for (const d of feature.decisions) {
+        all.push({ ...d, source: `feature: ${feature.title}` })
+      }
+    }
+    for (const phase of feature.phases) {
+      for (const task of phase.tasks) {
+        if (task.decisions?.length) {
+          for (const d of task.decisions) {
+            all.push({ ...d, source: `${feature.title} > ${task.title}` })
+          }
+        }
+      }
+    }
+  }
+  for (const issue of store.issues) {
+    if (issue.decisions?.length) {
+      for (const d of issue.decisions) {
+        all.push({ ...d, source: `issue: ${issue.title}` })
+      }
+    }
+  }
+  return all
+}
+
+/** Find decisions whose text overlaps with the user's prompt. */
+function findRelevantDecisions(
+  prompt: string,
+  allDecisions: Array<Decision & { source: string }>,
+): Array<Decision & { source: string }> {
+  if (!prompt || allDecisions.length === 0) return []
+
+  const promptTokens = tokenize(prompt)
+  if (promptTokens.size === 0) return []
+
+  const matches: Array<Decision & { source: string; score: number }> = []
+  for (const d of allDecisions) {
+    const decisionText = `${d.decision} ${d.reasoning ?? ''}`
+    const decisionTokens = tokenize(decisionText)
+    // Count overlapping tokens
+    let overlap = 0
+    for (const token of decisionTokens) {
+      if (promptTokens.has(token)) overlap++
+    }
+    // Require at least 2 overlapping tokens to avoid noise
+    if (overlap >= 2) {
+      matches.push({ ...d, score: overlap })
+    }
+  }
+
+  // Sort by relevance, return top 5
+  return matches.sort((a, b) => b.score - a.score).slice(0, 5)
+}
+
+interface AgentIdentity {
+  agent?: string
+  model?: string
+  instance?: string
+}
+
+/** Save the agent identity for the current session so prompt-context can reference it. */
+export function saveIdentity(cwd: string, identity: AgentIdentity): void {
+  const pmDir = join(cwd, '.pm')
+  if (!existsSync(pmDir)) mkdirSync(pmDir, { recursive: true })
+  writeFileSync(IDENTITY_FILE(cwd), JSON.stringify(identity, null, 2))
+}
+
+/** Load the persisted agent identity. */
+function loadIdentity(cwd: string): AgentIdentity | null {
+  const path = IDENTITY_FILE(cwd)
+  if (!existsSync(path)) return null
+  try {
+    return JSON.parse(readFileSync(path, 'utf-8'))
+  } catch {
+    return null
+  }
 }
 
 /** Load the edit session tracker. */
@@ -117,8 +243,10 @@ export function recordEdit(cwd: string, filePath: string): EditSession {
   return session
 }
 
-/** Get scope-aware status summary for prompt context injection. */
-export function getStatusSummary(cwd: string): string {
+/** Get scope-aware status summary for prompt context injection.
+ *  When `agent`/`instance` are provided, only shows matching work.
+ *  When `prompt` is provided, searches all decisions for relevance. */
+export function getStatusSummary(cwd: string, agent?: string, instance?: string, prompt?: string): string {
   const dataPath = PM_DATA(cwd)
   if (!existsSync(dataPath)) return ''
 
@@ -129,36 +257,57 @@ export function getStatusSummary(cwd: string): string {
     return ''
   }
 
-  const active = getActiveId(store)
+  const active = getActiveId(store, agent, instance)
   const session = loadSession(cwd)
+  const allDecisions = collectAllDecisions(store)
+
+  // Build identity flags string from persisted identity (saved at SessionStart)
+  const identity = loadIdentity(cwd)
+  const idFlags: string[] = []
+  if (identity?.agent) idFlags.push(`--agent ${identity.agent}`)
+  if (identity?.model) idFlags.push(`--model ${identity.model}`)
+  const idSuffix = idFlags.length > 0 ? ' ' + idFlags.join(' ') : ''
 
   // === No active work — tell Claude to assess scope and log work itself ===
   if (!active) {
-    return `[pm] No active work tracked. You MUST log work in pm before editing any code. Assess the scope of the user's request and run the appropriate commands yourself:
+    const parts = [`[pm] No active work tracked. You MUST log work in pm before editing any code. Assess the scope of the user's request and run the appropriate commands yourself:
 
   Quick one-off fix (1-2 files, small change):
-    Run: pm add-issue "description"
+    Run: pm add-issue "description"${idSuffix}
 
   Structured work (3+ files, multiple logical steps):
     Run: pm add-feature "title" --description "..."
-    Then: pm add-phase, pm add-task, pm start <taskId>
-
+    Then: pm add-phase, pm add-task, pm start <taskId>${idSuffix}
+${idSuffix ? `\n  IMPORTANT: Always pass ${idSuffix.trim()} on every pm command (add-issue, add-feature, start, done, decide, etc.) to record who did the work.` : ''}
   Scope rules:
   - Each task = focused unit, 1-3 files, one logical change
   - 4+ files = feature with multiple tasks, not a single issue
   - Distinct stages (design, implement, test) = separate phases
-  - When in doubt, start with add-issue — upgrade later if scope grows`
+  - When in doubt, start with add-issue — upgrade later if scope grows`]
+
+    // Even without active work, surface relevant decisions from past work
+    const relevant = findRelevantDecisions(prompt ?? '', allDecisions)
+    if (relevant.length > 0) {
+      parts.push('')
+      parts.push('  Prior decisions relevant to this prompt — review before proceeding:')
+      for (const d of relevant) {
+        parts.push(`  - "${d.decision}"${d.reasoning ? ` (${d.reasoning})` : ''} [from ${d.source}]`)
+      }
+      parts.push('  If the user wants to change any of these: discuss it with them first. Do NOT silently override.')
+    }
+
+    return parts.join('\n')
   }
 
   // === Active work — show status + scope tracking ===
   const lines: string[] = []
-  const decisions: Array<{ decision: string; reasoning?: string }> = []
+  const taskDecisions: Array<{ decision: string; reasoning?: string }> = []
 
   // Current work
   for (const feature of store.features) {
     for (const phase of feature.phases) {
       for (const task of phase.tasks) {
-        if (task.status === 'in-progress') {
+        if (task.status === 'in-progress' && matchesIdentity(task, agent, instance)) {
           const featureProgress = feature.phases.reduce(
             (acc, p) => {
               const done = p.tasks.filter(t => t.status === 'done').length
@@ -166,31 +315,60 @@ export function getStatusSummary(cwd: string): string {
             },
             { done: 0, total: 0 },
           )
-          lines.push(`  Task: "${task.title}" (${feature.title} > ${phase.title})`)
+          const agentLabel = task.agent ? ` [${task.agent}]` : ''
+          lines.push(`  Task: "${task.title}" (${feature.title} > ${phase.title})${agentLabel}`)
           lines.push(`  Progress: ${featureProgress.done}/${featureProgress.total} tasks done`)
 
           // Collect decisions from this task and its parent feature
-          if (task.decisions?.length) decisions.push(...task.decisions)
-          if (feature.decisions?.length) decisions.push(...feature.decisions)
+          if (task.decisions?.length) taskDecisions.push(...task.decisions)
+          if (feature.decisions?.length) taskDecisions.push(...feature.decisions)
         }
       }
     }
   }
   for (const issue of store.issues) {
-    if (issue.status !== 'done') {
-      lines.push(`  Issue: "${issue.title}" [${issue.priority}]`)
-      if (issue.decisions?.length) decisions.push(...issue.decisions)
+    if (issue.status !== 'done' && matchesIdentity(issue, agent, instance)) {
+      const issueAgent = issue.agent ? ` [${issue.agent}]` : ''
+      lines.push(`  Issue: "${issue.title}" [${issue.priority}]${issueAgent}`)
+      if (issue.decisions?.length) taskDecisions.push(...issue.decisions)
     }
   }
 
-  // Relevant decisions
-  if (decisions.length > 0) {
+  // Current task/feature decisions
+  if (taskDecisions.length > 0) {
     lines.push('')
-    lines.push('  Decisions:')
-    for (const d of decisions) {
+    lines.push('  Decisions (current work):')
+    for (const d of taskDecisions) {
       lines.push(`  - ${d.decision}${d.reasoning ? ` — ${d.reasoning}` : ''}`)
     }
   }
+
+  // Prompt-aware: surface decisions from OTHER tasks/features that match what's being discussed
+  const relevant = findRelevantDecisions(prompt ?? '', allDecisions)
+  // Filter out decisions already shown from current task
+  const taskDecisionTexts = new Set(taskDecisions.map(d => d.decision))
+  const extra = relevant.filter(d => !taskDecisionTexts.has(d.decision))
+  if (extra.length > 0) {
+    lines.push('')
+    lines.push('  Prior decisions relevant to this prompt:')
+    for (const d of extra) {
+      lines.push(`  - "${d.decision}"${d.reasoning ? ` (${d.reasoning})` : ''} [from ${d.source}]`)
+    }
+    lines.push('  If the user wants to change any of these: ASK THEM first. Do NOT silently override.')
+  }
+
+  // Identity reminder — always present when identity is known
+  if (idSuffix) {
+    lines.push('')
+    lines.push(`  Identity: always pass ${idSuffix.trim()} on pm commands (done, decide, add-issue, start, etc.)`)
+  }
+
+  // Decision protocol — always present
+  lines.push('')
+  lines.push('  Decision protocol:')
+  lines.push('  - Before choosing an approach: run `pm why "keyword"` to check existing decisions')
+  lines.push('  - After making any design choice: run `pm decide <id> "what" --reasoning "why"`')
+  lines.push('  - To reverse a prior decision: ASK THE USER first, then `pm decide` with the new choice')
 
   // Scope tracking
   if (session && session.activeId === active.id && session.files.length > 0) {
@@ -211,8 +389,22 @@ export function getStatusSummary(cwd: string): string {
   return `[pm] Active work:\n${lines.join('\n')}`
 }
 
-/** Write hook configuration to .claude/settings.json in the project. */
-export function ensureHooks(cwd: string): 'added' | 'updated' | 'exists' {
+/** Check if Claude Code pm hooks are already installed. */
+export function hasClaudeHooks(cwd: string): boolean {
+  const settingsPath = join(cwd, '.claude', 'settings.json')
+  if (!existsSync(settingsPath)) return false
+  try {
+    const settings: ClaudeSettings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
+    const hooks = settings.hooks?.PreToolUse ?? []
+    return hooks.some(
+      (c: HookConfig) => c.hooks.some(h => h.command.includes('pm hook'))
+    )
+  } catch { return false }
+}
+
+/** Write hook configuration to .claude/settings.json in the project.
+ *  When `force` is true, always rewrite hooks even if content matches. */
+export function ensureHooks(cwd: string, force = false): 'added' | 'updated' | 'exists' {
   const claudeDir = join(cwd, '.claude')
   const settingsPath = join(claudeDir, 'settings.json')
 
@@ -227,25 +419,25 @@ export function ensureHooks(cwd: string): 'added' | 'updated' | 'exists' {
     PreToolUse: [
       {
         matcher: 'Edit|Write',
-        hooks: [{ type: 'command', command: 'pm hook pre-edit', timeout: 5 }],
+        hooks: [{ type: 'command', command: 'pm hook pre-edit --agent claude-code --instance $PPID', timeout: 5 }],
       },
     ],
     PostToolUse: [
       {
         matcher: 'Edit|Write',
-        hooks: [{ type: 'command', command: 'pm hook post-edit', timeout: 5 }],
+        hooks: [{ type: 'command', command: 'pm hook post-edit --agent claude-code --instance $PPID', timeout: 5 }],
       },
     ],
     UserPromptSubmit: [
       {
         matcher: '',
-        hooks: [{ type: 'command', command: 'pm hook prompt-context', timeout: 5 }],
+        hooks: [{ type: 'command', command: 'pm hook prompt-context --agent claude-code --instance $PPID', timeout: 5 }],
       },
     ],
     SessionStart: [
       {
         matcher: '',
-        hooks: [{ type: 'command', command: 'pm hook session-start', timeout: 10 }],
+        hooks: [{ type: 'command', command: 'pm hook session-start --agent claude-code --instance $PPID', timeout: 10 }],
       },
     ],
   }
@@ -259,7 +451,7 @@ export function ensureHooks(cwd: string): 'added' | 'updated' | 'exists' {
     const eventHooks = merged[event] ?? []
     // Remove any existing pm hooks
     const filtered = eventHooks.filter(
-      (c: HookConfig) => !c.hooks.some(h => h.command.startsWith('pm hook'))
+      (c: HookConfig) => !c.hooks.some(h => h.command.includes('pm hook'))
     )
     merged[event] = [...filtered, ...configs]
   }
@@ -267,8 +459,9 @@ export function ensureHooks(cwd: string): 'added' | 'updated' | 'exists' {
   settings.hooks = merged
   const mergedStr = JSON.stringify(merged)
 
-  if (existingStr === mergedStr) return 'exists'
+  if (!force && existingStr === mergedStr) return 'exists'
 
   writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n')
+  if (force && existingStr === mergedStr) return 'updated'
   return Object.keys(existing).length === 0 ? 'added' : 'updated'
 }

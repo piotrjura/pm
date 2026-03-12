@@ -28,7 +28,7 @@ export function InitScreen({ status, onConfirm, onQuit }: InitScreenProps) {
         </Box>
         <Box flexDirection="column">
           <Text bold>pm <Text dimColor>v{PM_VERSION}</Text></Text>
-          <Text dimColor>Project Manager for Claude Code</Text>
+          <Text dimColor>project manager for agents</Text>
           <Text dimColor>{status.projectDir}</Text>
         </Box>
       </Box>
