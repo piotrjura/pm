@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createTestDir, cleanupTestDir, pm, loadData, createFullFeature } from './helpers.js'
 
@@ -140,10 +140,41 @@ describe('pm init --opencode', () => {
 
     const content = readFileSync(pluginPath, 'utf-8')
     expect(content).toContain('PmPlugin')
-    expect(content).toContain('--agent opencode')
+    expect(content).toContain('agent = "opencode"')
     expect(content).toContain('tool.execute.before')
     expect(content).toContain('tool.execute.after')
     expect(content).toContain('tui.prompt.append')
+  })
+
+  it('creates opencode.json with plugin registered', () => {
+    pm('init --opencode', cwd)
+    const configPath = join(cwd, 'opencode.json')
+    expect(existsSync(configPath)).toBe(true)
+
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'))
+    expect(config.plugin).toContain('./.opencode/plugins/pm.ts')
+  })
+
+  it('preserves existing opencode.json fields', () => {
+    const configPath = join(cwd, 'opencode.json')
+    writeFileSync(configPath, JSON.stringify({ theme: 'dark', plugin: ['./other-plugin.ts'] }, null, 2))
+
+    pm('init --opencode', cwd)
+
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'))
+    expect(config.theme).toBe('dark')
+    expect(config.plugin).toContain('./other-plugin.ts')
+    expect(config.plugin).toContain('./.opencode/plugins/pm.ts')
+  })
+
+  it('does not duplicate plugin entry on re-init', () => {
+    pm('init --opencode', cwd)
+    pm('init --opencode', cwd)
+
+    const configPath = join(cwd, 'opencode.json')
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'))
+    const pmEntries = config.plugin.filter((p: string) => p === './.opencode/plugins/pm.ts')
+    expect(pmEntries.length).toBe(1)
   })
 
   it('--opencode alone does not set up Claude Code', () => {

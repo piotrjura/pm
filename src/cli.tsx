@@ -21,6 +21,9 @@ import { cmdRecap } from './commands/recap.js'
 import { cmdHook } from './commands/hook.js'
 import { cmdWhy } from './commands/why.js'
 import { cmdCleanup } from './commands/cleanup.js'
+import { cmdForget } from './commands/forget.js'
+import { cmdSettings } from './commands/settings.js'
+import { isDecisionsEnabled } from './lib/config.js'
 
 const [,, subcommand, ...rest] = process.argv
 
@@ -82,6 +85,10 @@ switch (subcommand) {
     cmdUpdate(rest)
     break
   case 'decide':
+    if (!isDecisionsEnabled()) {
+      console.log('Decisions are disabled. Enable with: pm settings')
+      break
+    }
     cmdDecide(rest)
     break
   case 'recap':
@@ -91,10 +98,24 @@ switch (subcommand) {
     cmdHook(rest)
     break
   case 'why':
+    if (!isDecisionsEnabled()) {
+      console.log('Decisions are disabled. Enable with: pm settings')
+      break
+    }
     cmdWhy(rest)
     break
   case 'cleanup':
     cmdCleanup(rest)
+    break
+  case 'forget':
+    if (!isDecisionsEnabled()) {
+      console.log('Decisions are disabled. Enable with: pm settings')
+      break
+    }
+    cmdForget(rest)
+    break
+  case 'settings':
+    await cmdSettings()
     break
   case 'help':
   case '--help':
@@ -120,6 +141,8 @@ Track work:
   pm add-issue <title>   [--type bug|change] [--priority urgent|high|medium|low] [--description "..."] [--model <name>]
   pm decide <id> "decision" [--reasoning "why, trade-offs"]
   pm why [search]        List all decisions, or search — find out why something was built a certain way
+  pm forget "text"       Remove a decision (exact match or search)
+  pm settings            Configure features and agents
   pm init --force        Overwrite hooks and plugins (auto-detects configured agents)
   pm cleanup             Reset stuck tasks [--errors] [--drafts] [--all] [--quiet]
   pm recap               Briefing: active work, recent decisions, next steps

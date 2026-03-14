@@ -2,11 +2,14 @@ import { loadStore } from '../lib/store.js'
 import { ensureClaudePermission } from '../lib/init.js'
 import { ensureHooks, hasClaudeHooks } from '../lib/hooks.js'
 import { ensureOpenCodePlugin, hasOpenCodePlugin } from '../lib/opencode.js'
+import { loadConfig, saveConfig } from '../lib/config.js'
 import { hasFlag } from '../lib/args.js'
+import type { Config } from '../lib/types.js'
 
 function cmdInitNonInteractive(args: string[]) {
   const cwd = process.cwd()
   const force = hasFlag(args, '--force')
+  const noDecisions = hasFlag(args, '--no-decisions')
   const explicitClaudeCode = hasFlag(args, '--claude-code')
   const explicitOpenCode = hasFlag(args, '--opencode')
   const hasExplicitAgent = explicitClaudeCode || explicitOpenCode
@@ -33,6 +36,18 @@ function cmdInitNonInteractive(args: string[]) {
     pluginResult = ensureOpenCodePlugin(cwd, force)
   }
 
+  // Step 4: Write config
+  const existingConfig = force ? loadConfig(cwd) : { decisions: true, agents: [] as string[] }
+  const agents: string[] = force ? existingConfig.agents : []
+  if (setupClaudeCode && !agents.includes('claude-code')) agents.push('claude-code')
+  if (setupOpenCode && !agents.includes('opencode')) agents.push('opencode')
+
+  const config: Config = {
+    decisions: noDecisions ? false : (force ? existingConfig.decisions : true),
+    agents,
+  }
+  saveConfig(config, cwd)
+
   console.log(`${force ? 'Reinitialized' : 'Initialized'} pm in ${cwd}`)
   console.log()
   console.log('Setup:')
@@ -45,6 +60,8 @@ function cmdInitNonInteractive(args: string[]) {
   if (setupOpenCode) {
     console.log(`  \u2713 opencode            plugin ${pluginResult}`)
   }
+
+  console.log(`  \u2713 config              decisions=${config.decisions}, agents=[${config.agents.join(', ')}]`)
 
   console.log()
   if (!force) {

@@ -5,6 +5,7 @@ export type Screen =
   | { type: 'feature-detail'; featureId: string }
   | { type: 'issue-detail'; issueId: string }
   | { type: 'decisions' }
+  | { type: 'settings' }
 
 export type ListPosition = { cursor: number; page: number }
 export type ListState = ListPosition & { search: string }
@@ -27,9 +28,13 @@ export function useNavigation() {
     setScreen({ type: 'decisions' })
   }, [])
 
+  const openSettings = useCallback(() => {
+    setScreen({ type: 'settings' })
+  }, [])
+
   const goBack = useCallback(() => {
     setScreen({ type: 'list' })
   }, [])
 
-  return { screen, listState: listState.current, openFeature, openIssue, openDecisions, goBack }
+  return { screen, listState: listState.current, openFeature, openIssue, openDecisions, openSettings, goBack }
 }

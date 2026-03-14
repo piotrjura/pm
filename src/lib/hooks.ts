@@ -1,13 +1,14 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import type { DataStore, Decision } from './types.js'
+import { isDecisionsEnabled } from './config.js'
 
 const PM_DATA = (cwd: string) => join(cwd, '.pm', 'data.json')
 const SESSION_FILE = (cwd: string) => join(cwd, '.pm', 'session.json')
 const IDENTITY_FILE = (cwd: string) => join(cwd, '.pm', 'identity.json')
 
 // Scope warning thresholds
-const SCOPE_WARN_FILES = 4 // warn when this many unique files edited under one task
+export const SCOPE_WARN_FILES = 4 // warn when this many unique files edited under one task
 
 // Words to ignore when matching prompt text against decisions
 const STOP_WORDS = new Set([
@@ -259,7 +260,8 @@ export function getStatusSummary(cwd: string, agent?: string, instance?: string,
 
   const active = getActiveId(store, agent, instance)
   const session = loadSession(cwd)
-  const allDecisions = collectAllDecisions(store)
+  const decisionsOn = isDecisionsEnabled(cwd)
+  const allDecisions = decisionsOn ? collectAllDecisions(store) : []
 
   // Build identity flags string from persisted identity (saved at SessionStart)
   const identity = loadIdentity(cwd)
@@ -286,14 +288,16 @@ ${idSuffix ? `\n  IMPORTANT: Always pass ${idSuffix.trim()} on every pm command 
   - When in doubt, start with add-issue — upgrade later if scope grows`]
 
     // Even without active work, surface relevant decisions from past work
-    const relevant = findRelevantDecisions(prompt ?? '', allDecisions)
-    if (relevant.length > 0) {
-      parts.push('')
-      parts.push('  Prior decisions relevant to this prompt — review before proceeding:')
-      for (const d of relevant) {
-        parts.push(`  - "${d.decision}"${d.reasoning ? ` (${d.reasoning})` : ''} [from ${d.source}]`)
+    if (decisionsOn) {
+      const relevant = findRelevantDecisions(prompt ?? '', allDecisions)
+      if (relevant.length > 0) {
+        parts.push('')
+        parts.push('  Prior decisions relevant to this prompt — review before proceeding:')
+        for (const d of relevant) {
+          parts.push(`  - "${d.decision}"${d.reasoning ? ` (${d.reasoning})` : ''} [from ${d.source}]`)
+        }
+        parts.push('  These are context from prior work, not hard rules. If the user\'s request conflicts, follow the user.')
       }
-      parts.push('  If the user wants to change any of these: discuss it with them first. Do NOT silently override.')
     }
 
     return parts.join('\n')
@@ -335,7 +339,7 @@ ${idSuffix ? `\n  IMPORTANT: Always pass ${idSuffix.trim()} on every pm command 
   }
 
   // Current task/feature decisions
-  if (taskDecisions.length > 0) {
+  if (decisionsOn && taskDecisions.length > 0) {
     lines.push('')
     lines.push('  Decisions (current work):')
     for (const d of taskDecisions) {
@@ -344,17 +348,19 @@ ${idSuffix ? `\n  IMPORTANT: Always pass ${idSuffix.trim()} on every pm command 
   }
 
   // Prompt-aware: surface decisions from OTHER tasks/features that match what's being discussed
-  const relevant = findRelevantDecisions(prompt ?? '', allDecisions)
-  // Filter out decisions already shown from current task
-  const taskDecisionTexts = new Set(taskDecisions.map(d => d.decision))
-  const extra = relevant.filter(d => !taskDecisionTexts.has(d.decision))
-  if (extra.length > 0) {
-    lines.push('')
-    lines.push('  Prior decisions relevant to this prompt:')
-    for (const d of extra) {
-      lines.push(`  - "${d.decision}"${d.reasoning ? ` (${d.reasoning})` : ''} [from ${d.source}]`)
+  if (decisionsOn) {
+    const relevant = findRelevantDecisions(prompt ?? '', allDecisions)
+    // Filter out decisions already shown from current task
+    const taskDecisionTexts = new Set(taskDecisions.map(d => d.decision))
+    const extra = relevant.filter(d => !taskDecisionTexts.has(d.decision))
+    if (extra.length > 0) {
+      lines.push('')
+      lines.push('  Prior decisions relevant to this prompt:')
+      for (const d of extra) {
+        lines.push(`  - "${d.decision}"${d.reasoning ? ` (${d.reasoning})` : ''} [from ${d.source}]`)
+      }
+      lines.push('  These are context from prior work, not hard rules. If the user\'s request conflicts, follow the user.')
     }
-    lines.push('  If the user wants to change any of these: ASK THEM first. Do NOT silently override.')
   }
 
   // Identity reminder — always present when identity is known
@@ -363,12 +369,14 @@ ${idSuffix ? `\n  IMPORTANT: Always pass ${idSuffix.trim()} on every pm command 
     lines.push(`  Identity: always pass ${idSuffix.trim()} on pm commands (done, decide, add-issue, start, etc.)`)
   }
 
-  // Decision protocol — always present
-  lines.push('')
-  lines.push('  Decision protocol:')
-  lines.push('  - Before choosing an approach: run `pm why "keyword"` to check existing decisions')
-  lines.push('  - After making any design choice: run `pm decide <id> "what" --reasoning "why"`')
-  lines.push('  - To reverse a prior decision: ASK THE USER first, then `pm decide` with the new choice')
+  // Decision protocol — only when decisions enabled
+  if (decisionsOn) {
+    lines.push('')
+    lines.push('  Decisions: context, not law. Prior decisions inform your approach but the user\'s current request takes priority.')
+    lines.push('  - `pm why "keyword"` — check if a prior decision exists before choosing an approach')
+    lines.push('  - `pm decide <id> "what" --reasoning "why"` — record new decisions')
+    lines.push('  - `pm forget "text"` — remove an outdated decision')
+  }
 
   // Scope tracking
   if (session && session.activeId === active.id && session.files.length > 0) {
@@ -376,11 +384,14 @@ ${idSuffix ? `\n  IMPORTANT: Always pass ${idSuffix.trim()} on every pm command 
 
     if (session.files.length >= SCOPE_WARN_FILES) {
       lines.push('')
-      lines.push(`  ⚠ SCOPE CHECK: ${session.files.length} files under one ${active.type}. You should break this down.`)
+      lines.push(`  ⚠ SCOPE VIOLATION: ${session.files.length} files edited under one ${active.type} (limit: ${SCOPE_WARN_FILES - 1}). pm done will REJECT this.`)
+      lines.push(`  Stop editing and split your work NOW:`)
       if (active.type === 'issue') {
-        lines.push(`  Run: pm add-feature "..." to upgrade, then add phases/tasks for remaining work.`)
+        lines.push(`  1. pm done <id> --force --note "what was completed so far"`)
+        lines.push(`  2. pm add-feature "..." to upgrade, then add phases/tasks for remaining work`)
       } else {
-        lines.push(`  Run: pm add-task to split remaining work into additional focused tasks.`)
+        lines.push(`  1. pm done <id> --force --note "what was completed so far"`)
+        lines.push(`  2. pm add-task to create additional focused tasks for remaining work`)
       }
       lines.push(`  Files so far: ${session.files.join(', ')}`)
     }

@@ -15,11 +15,12 @@ const TASK_COLOR: Record<Task['status'], string | undefined> = {
 interface FeatureDetailProps {
   feature: Feature
   height: number
+  width?: number
   focused: boolean
   onBack: () => void
 }
 
-export function FeatureDetail({ feature, height, focused, onBack }: FeatureDetailProps) {
+export function FeatureDetail({ feature, height, width, focused, onBack }: FeatureDetailProps) {
   const allTasks = feature.phases.flatMap(p => p.tasks)
   const [cursor, setCursor] = useState(0)
 
@@ -41,7 +42,7 @@ export function FeatureDetail({ feature, height, focused, onBack }: FeatureDetai
           <Text color={typeColor}>[{feature.type}]</Text>
         </Box>
         <Box flexShrink={1} flexGrow={1}>
-          <Text bold color={isDone ? 'green' : undefined} wrap="truncate">{feature.title}</Text>
+          <Text bold color={isDone ? 'green' : undefined}>{feature.title}</Text>
         </Box>
         {isDone && feature.doneAt && (
           <Box flexShrink={0}>
@@ -63,9 +64,9 @@ export function FeatureDetail({ feature, height, focused, onBack }: FeatureDetai
         <Box flexDirection="column" marginBottom={1}>
           <Text bold color="magenta">  Decisions</Text>
           {feature.decisions.map((d, i) => (
-            <Box key={i} paddingLeft={4} flexDirection="column">
-              <Text>• {d.decision}</Text>
-              {d.reasoning && <Text dimColor>  Why: {d.reasoning}</Text>}
+            <Box key={i} paddingLeft={4} flexDirection="column" width={width ? width - 8 : undefined}>
+              <Text wrap="wrap">• {d.decision}</Text>
+              {d.reasoning && <Text dimColor wrap="wrap">  Why: {d.reasoning}</Text>}
             </Box>
           ))}
         </Box>
@@ -121,8 +122,8 @@ export function FeatureDetail({ feature, height, focused, onBack }: FeatureDetai
 
                     {/* Note row — shown always for done tasks, or when cursor is on it */}
                     {task.note && (isCursor || isDoneTask) && (
-                      <Box paddingLeft={3}>
-                        <Text dimColor>↳ {task.note}</Text>
+                      <Box paddingLeft={3} width={width ? width - 11 : undefined}>
+                        <Text dimColor wrap="wrap">↳ {task.note}</Text>
                       </Box>
                     )}
 

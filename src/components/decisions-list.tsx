@@ -7,6 +7,7 @@ interface DecisionsListProps {
   decisions: DecisionMatch[]
   height: number
   onBack: () => void
+  onDelete: (decisionText: string) => void
 }
 
 const SOURCE_COLOR: Record<string, string> = {
@@ -21,7 +22,7 @@ function sourceLabel(source: DecisionMatch['source']): string {
   return source.issueTitle
 }
 
-export function DecisionsList({ decisions, height, onBack }: DecisionsListProps) {
+export function DecisionsList({ decisions, height, onBack, onDelete }: DecisionsListProps) {
   const [cursor, setCursor] = useState(0)
   const [search, setSearch] = useState('')
   const [searchMode, setSearchMode] = useState(false)
@@ -54,6 +55,13 @@ export function DecisionsList({ decisions, height, onBack }: DecisionsListProps)
       else onBack()
     }
     else if (input === 'b') onBack()
+    else if (input === 'd' && filtered.length > 0) {
+      const item = filtered[cursor]
+      if (item) {
+        onDelete(item.decision.decision)
+        setCursor(c => clamp(Math.min(c, filtered.length - 2)))
+      }
+    }
   })
 
   const showSearchBar = searchMode || !!search

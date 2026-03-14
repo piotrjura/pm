@@ -97,6 +97,11 @@ export interface DataStore {
   log: LogEntry[]
 }
 
+export interface Config {
+  decisions: boolean
+  agents: string[]
+}
+
 // The resolved "next task" returned by getNextTask()
 export interface NextTask {
   featureId: string

@@ -18,7 +18,11 @@ export function useStore() {
 
   useEffect(() => {
     watchFile(DATA_FILE, { interval: 300 }, () => {
-      setStore(loadStore())
+      try {
+        setStore(loadStore())
+      } catch {
+        // File may be mid-write — skip this update, next poll will retry
+      }
     })
     return () => unwatchFile(DATA_FILE)
   }, [])

@@ -5,29 +5,35 @@ import type { Screen } from '../hooks/use-navigation.js'
 interface StatusBarProps {
   screen: Screen
   width: number
+  decisionsEnabled?: boolean
 }
 
 // A hint where the key is embedded in the label.
 // `keyLen` = how many chars from the start of `label` form the key (highlighted).
-// For special keys (↑↓, enter, esc), `prefix` is shown before the label.
+// For special keys (up/down, enter, esc), `prefix` is shown before the label.
 interface Hint {
   prefix?: string
   label: string
   keyLen: number
 }
 
-function getHints(screen: Screen): Hint[] {
+function getHints(screen: Screen, decisionsEnabled?: boolean): Hint[] {
   switch (screen.type) {
-    case 'list':
-      return [
+    case 'list': {
+      const hints: Hint[] = [
         { prefix: '↑↓', label: 'navigate', keyLen: 0 },
         { prefix: '⏎', label: 'open', keyLen: 0 },
         { label: '/search', keyLen: 1 },
-        { label: 'why', keyLen: 1 },
+      ]
+      if (decisionsEnabled) hints.push({ label: 'why', keyLen: 1 })
+      hints.push(
+        { label: 'settings', keyLen: 1 },
         { label: '[]page', keyLen: 2 },
         { label: 'delete', keyLen: 1 },
         { label: 'quit', keyLen: 1 },
-      ]
+      )
+      return hints
+    }
     case 'feature-detail':
       return [
         { prefix: '↑↓', label: 'task', keyLen: 0 },
@@ -43,8 +49,16 @@ function getHints(screen: Screen): Hint[] {
       return [
         { prefix: '↑↓', label: 'navigate', keyLen: 0 },
         { label: '/search', keyLen: 1 },
+        { label: 'delete', keyLen: 1 },
         { prefix: 'esc', label: 'back', keyLen: 0 },
         { label: 'quit', keyLen: 1 },
+      ]
+    case 'settings':
+      return [
+        { prefix: '↑↓', label: 'navigate', keyLen: 0 },
+        { prefix: '␣', label: 'toggle', keyLen: 0 },
+        { prefix: '⏎', label: 'save', keyLen: 0 },
+        { prefix: 'esc', label: 'back', keyLen: 0 },
       ]
   }
 }
@@ -53,13 +67,8 @@ function hintWidth(h: Hint): number {
   return (h.prefix ? h.prefix.length + 1 : 0) + h.label.length
 }
 
-function compactWidth(h: Hint): number {
-  if (h.prefix) return h.prefix.length
-  return h.keyLen || 1
-}
-
-export function StatusBar({ screen, width }: StatusBarProps) {
-  const hints = getHints(screen)
+export function StatusBar({ screen, width, decisionsEnabled }: StatusBarProps) {
+  const hints = getHints(screen, decisionsEnabled)
   const separator = '──'
   const paddingX = 2
   const gaps = (hints.length + 1) * 2 // gap=2 between each item

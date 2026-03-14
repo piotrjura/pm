@@ -6,16 +6,18 @@ import { UnifiedList } from './components/unified-list.js'
 import { FeatureDetail } from './components/feature-detail.js'
 import { IssueDetail } from './components/issue-detail.js'
 import { DecisionsList } from './components/decisions-list.js'
+import { SettingsScreen } from './components/settings-screen.js'
 import { InitScreen } from './components/init-screen.js'
 import { UpgradeScreen } from './components/upgrade-screen.js'
 import { useNavigation } from './hooks/use-navigation.js'
 import { useStore } from './hooks/use-store.js'
 import { detectProjectStatus, isInitialized, ensureClaudePermission, detectUpgrade } from './lib/init.js'
 import type { UpgradeInfo } from './lib/init.js'
-import { loadStore } from './lib/store.js'
+import { loadStore, removeDecision } from './lib/store.js'
 import type { DecisionMatch } from './lib/store.js'
 import { ensureHooks, hasClaudeHooks } from './lib/hooks.js'
 import { ensureOpenCodePlugin, hasOpenCodePlugin } from './lib/opencode.js'
+import { loadConfig, saveConfig } from './lib/config.js'
 import type { AgentUpgrade } from './lib/init.js'
 
 function setTerminalTitle(title: string) {
@@ -39,6 +41,7 @@ export function App() {
 
   const [initialized, setInitialized] = useState(() => isInitialized())
   const [projectStatus] = useState(() => detectProjectStatus())
+  const [config, setConfig] = useState(() => loadConfig())
   const [upgradeInfo, setUpgradeInfo] = useState<UpgradeInfo | null>(() => {
     if (!isInitialized()) return null
     const upgrade = detectUpgrade()
@@ -66,14 +69,30 @@ export function App() {
   const nav = useNavigation()
   const store = useStore()
 
+  const decisionsEnabled = config.decisions
+
   const handleInit = useCallback(() => {
     const cwd = process.cwd()
     loadStore()
     ensureClaudePermission()
     ensureHooks(cwd)
     setInitialized(true)
+    setConfig(loadConfig())
     store.refresh()
   }, [store])
+
+  const handleSettingsSave = useCallback((newConfig: typeof config) => {
+    const cwd = process.cwd()
+    saveConfig(newConfig, cwd)
+    if (newConfig.agents.includes('claude-code')) {
+      ensureClaudePermission()
+      ensureHooks(cwd)
+    }
+    if (newConfig.agents.includes('opencode')) {
+      ensureOpenCodePlugin(cwd)
+    }
+    setConfig(newConfig)
+  }, [])
 
   // Update terminal tab title based on current view
   useEffect(() => {
@@ -86,6 +105,8 @@ export function App() {
       setTerminalTitle(`pm — ${projectName} — ${issue?.title ?? 'Issue'}`)
     } else if (nav.screen.type === 'decisions') {
       setTerminalTitle(`pm — ${projectName} — Decisions`)
+    } else if (nav.screen.type === 'settings') {
+      setTerminalTitle(`pm — ${projectName} — Settings`)
     } else {
       setTerminalTitle(`pm — ${projectName}`)
     }
@@ -96,8 +117,35 @@ export function App() {
     return () => { setTerminalTitle('') }
   }, [])
 
+  // Collect all decisions from store for the decisions screen
+  const allDecisions = useMemo<DecisionMatch[]>(() => {
+    if (!decisionsEnabled) return []
+    const matches: DecisionMatch[] = []
+    for (const feature of store.store.features) {
+      for (const d of feature.decisions ?? []) {
+        matches.push({ decision: d, source: { type: 'feature', featureId: feature.id, featureTitle: feature.title } })
+      }
+      for (const phase of feature.phases) {
+        for (const task of phase.tasks) {
+          for (const d of task.decisions ?? []) {
+            matches.push({ decision: d, source: { type: 'task', featureId: feature.id, featureTitle: feature.title, taskId: task.id, taskTitle: task.title } })
+          }
+        }
+      }
+    }
+    for (const issue of store.store.issues) {
+      for (const d of issue.decisions ?? []) {
+        matches.push({ decision: d, source: { type: 'issue', issueId: issue.id, issueTitle: issue.title } })
+      }
+    }
+    matches.sort((a, b) => b.decision.at.localeCompare(a.decision.at))
+    return matches
+  }, [store.store.features, store.store.issues, decisionsEnabled])
+
   useInput((input, key) => {
     if (!initialized) return
+    // Don't handle global keys when on settings screen (it handles its own input)
+    if (nav.screen.type === 'settings') return
     if (input === 'q') { exit(); return }
     if (key.escape) { nav.goBack(); return }
   })
@@ -122,30 +170,6 @@ export function App() {
     )
   }
 
-  // Collect all decisions from store for the decisions screen
-  const allDecisions = useMemo<DecisionMatch[]>(() => {
-    const matches: DecisionMatch[] = []
-    for (const feature of store.store.features) {
-      for (const d of feature.decisions ?? []) {
-        matches.push({ decision: d, source: { type: 'feature', featureId: feature.id, featureTitle: feature.title } })
-      }
-      for (const phase of feature.phases) {
-        for (const task of phase.tasks) {
-          for (const d of task.decisions ?? []) {
-            matches.push({ decision: d, source: { type: 'task', featureId: feature.id, featureTitle: feature.title, taskId: task.id, taskTitle: task.title } })
-          }
-        }
-      }
-    }
-    for (const issue of store.store.issues) {
-      for (const d of issue.decisions ?? []) {
-        matches.push({ decision: d, source: { type: 'issue', issueId: issue.id, issueTitle: issue.title } })
-      }
-    }
-    matches.sort((a, b) => b.decision.at.localeCompare(a.decision.at))
-    return matches
-  }, [store.store.features, store.store.issues])
-
   const bodyHeight = rows - 1
 
   return (
@@ -160,7 +184,8 @@ export function App() {
             featureProgress={store.featureProgress}
             onSelectFeature={(id, state) => nav.openFeature(id, state)}
             onSelectIssue={(id, state) => nav.openIssue(id, state)}
-            onOpenDecisions={() => nav.openDecisions()}
+            onOpenDecisions={decisionsEnabled ? () => nav.openDecisions() : undefined}
+            onOpenSettings={() => nav.openSettings()}
             initialCursor={nav.listState.cursor}
             initialPage={nav.listState.page}
             initialSearch={nav.listState.search}
@@ -168,6 +193,7 @@ export function App() {
             onDeleteFeature={(id) => store.removeFeature(id)}
             onAddIssue={(title) => store.createIssue(title)}
             onDeleteIssue={(id) => store.removeIssue(id)}
+            decisionsEnabled={decisionsEnabled}
           />
         ) : nav.screen.type === 'feature-detail' ? (
           (() => {
@@ -178,6 +204,7 @@ export function App() {
               <FeatureDetail
                 feature={feature}
                 height={bodyHeight}
+                width={cols}
                 focused={true}
                 onBack={nav.goBack}
               />
@@ -200,10 +227,20 @@ export function App() {
             decisions={allDecisions}
             height={bodyHeight}
             onBack={nav.goBack}
+            onDelete={(text) => { removeDecision(text); store.refresh() }}
+          />
+        ) : nav.screen.type === 'settings' ? (
+          <SettingsScreen
+            inline={true}
+            onSave={handleSettingsSave}
+            onDone={(saved) => {
+              if (saved) store.refresh()
+              nav.goBack()
+            }}
           />
         ) : null}
       </Box>
-      <StatusBar screen={nav.screen} width={cols} />
+      <StatusBar screen={nav.screen} width={cols} decisionsEnabled={decisionsEnabled} />
     </Box>
   )
 }

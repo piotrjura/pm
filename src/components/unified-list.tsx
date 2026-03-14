@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react'
 import { Box, Text, useInput } from 'ink'
 import Spinner from 'ink-spinner'
 import type { Feature, Issue } from '../lib/types.js'
-import { relativeDate, progressBar, truncate, PRIORITY_COLOR, shortModel } from '../lib/format.js'
+import { relativeDate, progressBar, PRIORITY_COLOR } from '../lib/format.js'
 
 const PAGE_SIZE = 20
 
@@ -46,8 +46,10 @@ interface UnifiedListProps {
   onAddFeature: (type: 'feature' | 'fix') => void
   onDeleteFeature: (id: string) => void
   onAddIssue: (title: string) => void
-  onOpenDecisions: () => void
+  onOpenDecisions?: () => void
+  onOpenSettings: () => void
   onDeleteIssue: (id: string) => void
+  decisionsEnabled?: boolean
   initialCursor?: number
   initialPage?: number
   initialSearch?: string
@@ -62,8 +64,10 @@ export function UnifiedList({
   onSelectFeature,
   onSelectIssue,
   onOpenDecisions,
+  onOpenSettings,
   onDeleteFeature,
   onDeleteIssue,
+  decisionsEnabled = true,
   initialCursor = 0,
   initialPage = 0,
   initialSearch = '',
@@ -119,7 +123,8 @@ export function UnifiedList({
       if (item?.kind === 'feature') onSelectFeature(item.feature.id, state)
       else if (item?.kind === 'issue') onSelectIssue(item.issue.id, state)
     }
-    else if (input === 'w') { onOpenDecisions() }
+    else if (input === 'w' && decisionsEnabled && onOpenDecisions) { onOpenDecisions() }
+    else if (input === 's') { onOpenSettings() }
     else if (input === 'd' && pageItems.length > 0) {
       const item = pageItems[cursor]
       if (item?.kind === 'feature') {
@@ -132,18 +137,17 @@ export function UnifiedList({
     }
   })
 
-  // Available width for title text: total width minus padding(6) + cursor(2) + tag(9) + spaces(2) + icon(1)
-  const titleWidth = width - 20
-
   const activeCount = features.filter(f => f.status === 'in-progress').length
   const doneCount = features.filter(f => f.status === 'done').length
   const doneIssues = issues.filter(i => i.status === 'done').length
   const openIssues = issues.filter(i => i.status !== 'done').length
   const totalIssues = issues.length
-  const totalDecisions = features.reduce((sum, f) => {
-    return sum + (f.decisions?.length ?? 0) +
-      f.phases.reduce((s, p) => s + p.tasks.reduce((t, task) => t + (task.decisions?.length ?? 0), 0), 0)
-  }, 0) + issues.reduce((sum, i) => sum + (i.decisions?.length ?? 0), 0)
+  const totalDecisions = decisionsEnabled
+    ? features.reduce((sum, f) => {
+        return sum + (f.decisions?.length ?? 0) +
+          f.phases.reduce((s, p) => s + p.tasks.reduce((t, task) => t + (task.decisions?.length ?? 0), 0), 0)
+      }, 0) + issues.reduce((sum, i) => sum + (i.decisions?.length ?? 0), 0)
+    : 0
   const showSearchBar = searchMode || !!search
 
   return (
@@ -195,53 +199,48 @@ export function UnifiedList({
           // col 14+: title
           // progress row indent = 14 (cursor + space + tag(9) + space + icon + space)
 
+          // Gutter: 14 chars total — cursor(1) + space(1) + tag(9) + space(1) + icon(1) + space(1)
+          const GUTTER = 14
+
           if (item.kind === 'feature') {
             const f = item.feature
             const prog = featureProgress(f)
             const isActive = f.status === 'in-progress'
             const isDone = f.status === 'done'
             const typeColor = f.type === 'fix' ? 'red' : 'blue'
-            const typeLabel = (f.type === 'fix' ? '[fix]' : '[feat]').padEnd(9)
-            const decisionCount = (f.decisions?.length ?? 0) +
-              f.phases.reduce((sum, p) => sum + p.tasks.reduce((s, t) => s + (t.decisions?.length ?? 0), 0), 0)
+            const typeTag = f.type === 'fix' ? '[fix]' : '[feat]'
+            const statusIcon = isDone ? '✓' : '○'
+            const statusColor = isDone ? 'green' : 'gray'
+            const decisionCount = decisionsEnabled
+              ? (f.decisions?.length ?? 0) + f.phases.reduce((sum, p) => sum + p.tasks.reduce((s, t) => s + (t.decisions?.length ?? 0), 0), 0)
+              : 0
             const activeTask = isActive
               ? f.phases.flatMap(p => p.tasks).find(t => t.status === 'in-progress')
               : undefined
 
-            // Fixed column widths (enforced by Box, not string padding):
-            // col A: width=2  — cursor indicator + space
-            // col B: width=9  — type tag [feat], [fix], [change]
-            // col C: width=1  — space
-            // col D: width=1  — status icon
-            // col E: width=1  — space
-            // col F: flexGrow — title (truncated)
-            // progress row indent = 2+9+1+1+1 = 14
-
             return (
               <Box key={f.id} flexDirection="column">
                 <Box>
-                  <Box width={2}>
-                    <Text color="cyan">{isCursor ? '›' : ' '}</Text>
+                  <Box width={GUTTER} flexShrink={0}>
+                    <Text>
+                      <Text color="cyan">{isCursor ? '› ' : '  '}</Text>
+                      <Text color={typeColor} dimColor={!isCursor}>{typeTag.padEnd(9)}</Text>
+                      <Text> </Text>
+                      {isActive ? (
+                        <Spinner type="dots" />
+                      ) : (
+                        <Text color={statusColor}>{statusIcon}</Text>
+                      )}
+                      <Text> </Text>
+                    </Text>
                   </Box>
-                  <Box width={9}>
-                    <Text color={typeColor} dimColor={!isCursor}>[{f.type === 'fix' ? 'fix' : 'feat'}]</Text>
-                  </Box>
-                  <Box width={1}><Text> </Text></Box>
-                  <Box width={1}>
-                    {isActive ? (
-                      <Text color="yellow"><Spinner type="dots" /></Text>
-                    ) : (
-                      <Text color={isDone ? 'green' : 'gray'}>{isDone ? '✓' : '○'}</Text>
-                    )}
-                  </Box>
-                  <Box width={1}><Text> </Text></Box>
-                  <Box flexGrow={1}>
-                    <Text bold={isCursor} color={isDone ? 'gray' : isCursor ? 'white' : undefined} strikethrough={isDone} wrap="truncate">
-                      {truncate(f.title + (isCursor ? '  ↵ open' : ''), titleWidth)}
+                  <Box flexGrow={1} flexShrink={1}>
+                    <Text bold={isCursor} color={isDone ? 'gray' : isCursor ? 'white' : undefined} strikethrough={isDone} wrap="wrap">
+                      {f.title}
                     </Text>
                   </Box>
                 </Box>
-                <Box paddingLeft={14}>
+                <Box paddingLeft={GUTTER}>
                   {prog.total > 0 ? (
                     <Text>
                       <Text color={isDone ? 'green' : isActive ? 'yellow' : 'gray'}>
@@ -261,12 +260,8 @@ export function UnifiedList({
                   )}
                 </Box>
                 {activeTask && (
-                  <Box paddingLeft={14}>
-                    <Text color="yellow"><Spinner type="dots" /></Text>
-                    <Text color="yellow"> {truncate(activeTask.title, titleWidth - 2)}</Text>
-                    {(activeTask.agent || activeTask.model) && (
-                      <Text dimColor>  {[activeTask.agent, activeTask.model && shortModel(activeTask.model)].filter(Boolean).join('/')}</Text>
-                    )}
+                  <Box paddingLeft={GUTTER}>
+                    <Text color="yellow"><Spinner type="dots" /> {activeTask.title}</Text>
                   </Box>
                 )}
               </Box>
@@ -279,34 +274,31 @@ export function UnifiedList({
           const prioColor = PRIORITY_COLOR[iss.priority]
           const issueType = iss.type ?? 'bug'
           const issueColor = issueType === 'change' ? 'cyan' : 'red'
-          const issueDecisions = iss.decisions?.length ?? 0
+          const issueTag = `[${issueType}]`
+          const issueDecisions = decisionsEnabled ? (iss.decisions?.length ?? 0) : 0
           return (
             <Box key={iss.id} flexDirection="column">
               <Box>
-                <Box width={2}>
-                  <Text color="cyan">{isCursor ? '›' : ' '}</Text>
-                </Box>
-                <Box width={9}>
-                  <Text color={issueColor} dimColor={!isCursor}>[{issueType}]</Text>
-                </Box>
-                <Box width={1}><Text> </Text></Box>
-                <Box width={1}>
-                  <Text color={isIssueDone ? 'green' : prioColor}>{isIssueDone ? '✓' : '!'}</Text>
-                </Box>
-                <Box width={1}><Text> </Text></Box>
-                <Box flexGrow={1}>
-                  <Text bold={isCursor} color={isIssueDone ? 'gray' : isCursor ? 'white' : undefined} strikethrough={isIssueDone} wrap="truncate">
-                    {truncate(iss.title, titleWidth - iss.priority.length - relativeDate(iss.createdAt).length - (iss.agent ? iss.agent.length + 2 : 0) - (iss.model ? shortModel(iss.model).length + 1 : 0) - (issueDecisions > 0 ? 6 : 0) - 4)}
+                <Box width={GUTTER} flexShrink={0}>
+                  <Text>
+                    <Text color="cyan">{isCursor ? '› ' : '  '}</Text>
+                    <Text color={issueColor} dimColor={!isCursor}>{issueTag.padEnd(9)}</Text>
+                    <Text> </Text>
+                    <Text color={isIssueDone ? 'green' : prioColor}>{isIssueDone ? '✓' : '!'}</Text>
+                    <Text> </Text>
                   </Text>
-                  <Text dimColor>  {iss.priority}</Text>
-                  {(iss.agent || iss.model) && (
-                    <Text dimColor>  {[iss.agent, iss.model && shortModel(iss.model)].filter(Boolean).join('/')}</Text>
-                  )}
-                  {issueDecisions > 0 && (
-                    <Text color="magenta">  {issueDecisions}d</Text>
-                  )}
-                  <Text dimColor>  {relativeDate(iss.createdAt)}</Text>
                 </Box>
+                <Box flexGrow={1} flexShrink={1}>
+                  <Text bold={isCursor} color={isIssueDone ? 'gray' : isCursor ? 'white' : undefined} strikethrough={isIssueDone} wrap="wrap">
+                    {iss.title}
+                  </Text>
+                </Box>
+              </Box>
+              <Box paddingLeft={GUTTER}>
+                <Text dimColor>{iss.priority}  {relativeDate(iss.createdAt)}</Text>
+                {issueDecisions > 0 && (
+                  <Text color="magenta">  {issueDecisions}d</Text>
+                )}
               </Box>
             </Box>
           )

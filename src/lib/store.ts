@@ -22,7 +22,14 @@ export function loadStore(): DataStore {
     return empty
   }
   const raw = readFileSync(DATA_FILE, 'utf-8')
-  const data = JSON.parse(raw) as DataStore & { cycles?: unknown }
+  let data: DataStore & { cycles?: unknown }
+  try {
+    data = JSON.parse(raw)
+  } catch {
+    // File may be partially written — return last known good state or empty
+    const empty: DataStore = { pmVersion: PM_VERSION, features: [], issues: [], log: [] }
+    return empty
+  }
   let migrated = false
   if (!data.log) { data.log = []; migrated = true }
   for (const f of data.features) {
@@ -777,5 +784,43 @@ export function addDecision(id: string, decision: string, reasoning?: string): D
   }
 
   return null
+}
+
+/** Remove a decision by matching its text. Searches all features, tasks, and issues.
+ *  Returns true if a decision was removed. */
+export function removeDecision(decisionText: string): boolean {
+  const store = loadStore()
+
+  for (const feature of store.features) {
+    const idx = (feature.decisions ?? []).findIndex(d => d.decision === decisionText)
+    if (idx !== -1) {
+      feature.decisions!.splice(idx, 1)
+      feature.updatedAt = new Date().toISOString()
+      saveStore(store)
+      return true
+    }
+    for (const phase of feature.phases) {
+      for (const task of phase.tasks) {
+        const tidx = (task.decisions ?? []).findIndex(d => d.decision === decisionText)
+        if (tidx !== -1) {
+          task.decisions!.splice(tidx, 1)
+          feature.updatedAt = new Date().toISOString()
+          saveStore(store)
+          return true
+        }
+      }
+    }
+  }
+
+  for (const issue of store.issues) {
+    const idx = (issue.decisions ?? []).findIndex(d => d.decision === decisionText)
+    if (idx !== -1) {
+      issue.decisions!.splice(idx, 1)
+      saveStore(store)
+      return true
+    }
+  }
+
+  return false
 }
 
