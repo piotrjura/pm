@@ -1,5 +1,9 @@
 # pm
 
+### Demo
+
+https://github.com/piotrjura/pm/raw/refs/heads/main/pm-demo.mp4
+
 A project manager for AI coding agents. Not for you — for Claude.
 
 pm gives your AI agent structure so it doesn't just dive into code and lose track of what it's doing. It enforces planning before editing, tracks scope so changes don't sprawl across dozens of files, and logs decisions so the next session doesn't redo work the last one already figured out.
