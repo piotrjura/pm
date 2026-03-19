@@ -2,7 +2,7 @@
 
 ### Demo
 
-https://github.com/piotrjura/pm/raw/refs/heads/main/pm-demo.mp4
+<video src="https://github.com/piotrjura/pm/raw/refs/heads/main/pm-demo.mp4" controls></video>
 
 A project manager for AI coding agents. Not for you — for Claude.
 
