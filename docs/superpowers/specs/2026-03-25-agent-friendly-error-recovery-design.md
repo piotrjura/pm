@@ -1,19 +1,22 @@
 # Agent-Friendly Error Recovery & Superpowers Integration
 
 **Date:** 2026-03-25
-**Status:** Draft
+**Status:** Reviewed (v2 — addressed spec review findings)
 **Scope:** pm CLI changes only (no superpowers plugin modifications)
 
 ## Problem
 
-pm's hook system blocks agent edits and rejects `done` commands when scope rules are violated, but the error messages are instructional rather than actionable. Agents get stuck, loop, or fail instead of recovering. This is especially bad when superpowers dispatches subagents that have zero pm context.
+pm's hook system blocks agent edits and rejects `done` commands when scope rules are violated, but the error messages are instructional rather than actionable. Agents get stuck, loop, or fail instead of recovering.
 
 ### Pain Points
 
 1. **Pre-edit block with no recovery path** — agent tries to edit, pm says "log work first" with generic instructions, agent doesn't know what command to run
 2. **Scope violation at `done` time** — superpowers task legitimately touches 4+ files, `pm done` rejects, agent is stuck with no clear next step
-3. **Subagent blindness** — dispatched subagents have no pm context, hit hooks blind, get blocked with no understanding of project state
-4. **Decisions not surfaced** — agents skip `pm why` even when prior decisions are relevant to their brainstorming/planning
+3. **Decisions not surfaced** — agents skip `pm why` even when prior decisions are relevant to their brainstorming/planning
+
+### Non-Problem: Subagent Identity
+
+Subagents dispatched by superpowers share the parent's Claude Code process, so `$PPID` resolves identically. With `--agent claude-code` in the hook config, subagents see the parent's active work via `matchesIdentity`. Subagents are only blocked when there's genuinely no active work — which is addressed by Change 1 (smarter pre-edit errors).
 
 ### Design Principle
 
@@ -55,8 +58,9 @@ Then retry your edit.
 
 ### Implementation Details
 
-- **Title inference:** Extract filename without extension, convert kebab/camelCase to words, capitalize. `src/lib/hooks.ts` -> `"Update hooks"`. `src/commands/add-feature.ts` -> `"Update add-feature command"`.
-- **Identity flags:** Read from `.pm/identity.json` (already written by SessionStart hook). Include `--agent` and `--model` in suggested commands.
+- **Title inference:** Extract filename without extension, convert kebab/camelCase to words, capitalize. `src/lib/hooks.ts` -> `"Update hooks"`. `src/commands/add-feature.ts` -> `"Update add-feature command"`. For generic filenames (`types.ts`, `index.ts`, `utils.ts`) or config files (`package.json`, `tsconfig.json`), use parent directory for context: `src/lib/types.ts` -> `"Update lib types"`. If no useful title can be inferred, omit the title and let the agent fill it in: `pm add-issue "describe your change"`.
+- **Identity flags:** Read from `.pm/identity.json` (already written by SessionStart hook). Include `--agent` and `--model` in suggested commands. Quote model values containing brackets (e.g., `'claude-opus-4-6[1m]'`).
+- **Stdin parse failure:** If tool input JSON can't be parsed (no file path available), fall back to the generic form without an inferred title.
 - **Short message:** Max 6 lines. Agents parse short messages better than walls of text.
 
 ---
@@ -92,58 +96,31 @@ Or if this is legitimately one change:
 
 ### File Grouping Heuristics
 
-1. **Test files** — any path containing `test/`, `__tests__/`, `.test.`, `.spec.` -> group as "tests"
-2. **Directory grouping** — files in the same directory -> group by directory name
-3. **Shared prefix** — files with the same base name across directories (e.g., `hooks.ts` and `hooks.test.ts`) -> group together
-4. **Fallback** — ungrouped files get individual suggestions
+Applied in priority order (a file is assigned to the first matching group):
 
-Title generation: use the group name + action verb. Tests -> "Add tests for X". Same directory -> "Update X" where X is directory name.
+1. **Test files** (highest priority) — any path containing `test/`, `__tests__/`, `.test.`, `.spec.` -> group as "tests"
+2. **Directory grouping** — remaining (non-test) files in the same directory -> group by directory name
+3. **Fallback** — files that don't fit any group get individual suggestions
+
+Title generation: use the group name + action verb. Tests -> "Add tests for X" (where X is derived from the non-test files' groups). Same directory -> "Update X" where X is directory name.
+
+Note: rule 3 from the original design ("shared prefix") was removed because it conflicts with rule 1 in the most common case (editing a file and its test). Rule 1 always wins — test files go to the "tests" group.
+
+### Recovery sequencing
+
+After `pm done --force`, the agent has no active work and will be blocked by pre-edit if it tries to edit. The suggested `pm add-issue` commands are CLI commands (not edits), so they're whitelisted and work fine. The agent runs the add-issue commands, then can resume editing. This is safe because pm hooks only block Edit/Write tool calls, not Bash commands.
 
 ### Identity in suggestions
 
-Read from `.pm/identity.json` same as Change 1. Every suggested command includes `--agent` and `--model` flags.
+Read from `.pm/identity.json` same as Change 1. Every suggested command includes `--agent` and `--model` flags. Quote model values containing brackets.
 
 ---
 
-## Change 3: Subagent Awareness
-
-**Files:** `src/commands/hook.ts`, `src/lib/hooks.ts`
-
-### Current Behavior
-
-When an unidentified agent (no `--agent` flag) hits pre-edit with no matching active work, it gets the same generic block message.
-
-### New Behavior
-
-Before blocking, check if ANY agent has active work in the project. If yes, show that context:
-
-```
-BLOCKED: No active work for this agent.
-
-Active work exists in this project:
-  - task "Implement hook improvements" [claude-code] — in-progress
-  - issue "Fix type exports" [claude-code] — open
-
-To claim existing work:
-  pm start task-xyz --agent claude-code --model claude-opus-4-6[1m]
-
-Or start new tracking:
-  pm add-issue "description" --agent claude-code --model claude-opus-4-6[1m]
-```
-
-### Implementation Details
-
-- **New function: `getAllActiveWork(cwd)`** — returns all in-progress tasks and non-done issues regardless of agent identity. Used only in the error path (not for gating).
-- **Identity suggestion:** If identity.json exists, use those flags in suggested commands. If not, omit flags (agent can add them).
-- **No auto-claim:** The message tells the agent what exists and how to join — it must run the command itself.
-
----
-
-## Change 4: Decision Context Improvements
+## Change 3: Decision Context Improvements
 
 **Files:** `src/commands/why.ts`, `src/lib/hooks.ts`, `src/commands/decide.ts`, `src/lib/types.ts`
 
-### 4a: Action Lines on Decisions
+### 3a: Action Lines on Decisions
 
 **Current:** `pm why` output shows decision text and reasoning.
 
@@ -158,7 +135,7 @@ Prior decisions relevant to "hooks":
 
 The `action` field is optional — existing decisions without it display as before. New decisions can include it via `pm decide <id> "what" --reasoning "why" --action "do this"`.
 
-### 4b: Better Short-Prompt Matching
+### 3b: Better Short-Prompt Matching
 
 **Current:** `findRelevantDecisions` requires 2+ token overlap. Short prompts (1-2 meaningful words) rarely match.
 
@@ -168,13 +145,15 @@ The `action` field is optional — existing decisions without it display as befo
 
 This ensures focused queries like "fix hooks" or "update auth" find relevant decisions.
 
+**Noise mitigation:** When using the reduced threshold (1 overlap), limit results to top 3 instead of top 5 to reduce false positives from common terms.
+
 ### Schema Change
 
 Add optional `action?: string` to the `Decision` type in `src/lib/types.ts`. Add `--action` flag to `pm decide` in `src/commands/decide.ts`.
 
 ---
 
-## Change 5: `pm bridge` Command (Plan Import)
+## Change 4: `pm bridge` Command (Plan Import)
 
 **Files:** `src/commands/bridge.ts` (new), `src/cli.tsx`
 
@@ -209,8 +188,8 @@ Description text...
 
 ### Parsing Rules
 
-1. `# Title` -> feature title
-2. `## Phase N: Name` -> phase title (strip "Phase N: " prefix)
+1. `# Title` -> feature title. **Fallback:** if no `#` heading found, derive title from filename: `2026-03-25-hook-improvements.md` -> `"Hook improvements"`. If that also fails, error: "Could not determine feature title. Add a # heading to the plan file."
+2. `## Phase N: Name` -> phase title (strip "Phase N: " prefix, also handles `## Step N:` and bare `##` headings)
 3. `### Task N.M: Name` -> task title (strip "Task N.M: " prefix)
 4. `**Files:**` line -> extract file list for task `--files` parameter
 5. Everything between task heading and next heading -> task description
@@ -230,10 +209,18 @@ Start work:
   pm start task-1 --agent claude-code --model claude-opus-4-6[1m]
 ```
 
+### Identity Flags
+
+The `--agent` and `--model` flags are used in two places:
+- **Created tasks:** Tasks are created with the agent/model identity so `pm start` and `pm done` work correctly. The `addTaskToPhase` function already accepts these fields via `Omit<Task, 'id' | 'status'>`.
+- **Output suggestions:** The `pm start` command shown in output includes these flags for copy-paste convenience.
+
+Features and phases don't have agent/model fields — this is correct since they're organizational containers, not work items.
+
 ### Idempotency
 
-- Store the plan file path in feature metadata (`planSource` field)
-- On re-run, detect existing feature by `planSource` match
+- Store the plan file path in feature metadata (`planSource` field). **Schema change:** add optional `planSource?: string` to the `Feature` type in `src/lib/types.ts`.
+- On re-run, detect existing feature by `planSource` match. Secondary check: also match by feature title in case the plan file was moved.
 - If found, skip creation and show existing structure with a note: "Already imported. Use pm show <id> to view."
 
 ### Error Handling
@@ -248,11 +235,10 @@ Start work:
 
 Each change gets its own test file:
 
-1. **`test/smart-errors.test.ts`** — title inference from file paths, identity flag injection, message format
-2. **`test/scope-recovery.test.ts`** — file grouping heuristics, suggested command generation, edge cases (1 file per group, all files in same dir)
-3. **`test/subagent-awareness.test.ts`** — `getAllActiveWork`, error message with active work context, no active work fallback
-4. **`test/decision-context.test.ts`** — action field in decisions, adaptive matching threshold, short prompt matching
-5. **`test/bridge.test.ts`** — plan parsing, feature/phase/task creation, idempotency, error cases
+1. **`test/smart-errors.test.ts`** — title inference from file paths (including generic filenames, config files, stdin parse failure), identity flag injection, message format
+2. **`test/scope-recovery.test.ts`** — file grouping heuristics (priority ordering, test files always group first), suggested command generation, edge cases (1 file per group, all files in same dir, all test files)
+3. **`test/decision-context.test.ts`** — action field in decisions, adaptive matching threshold (1-token and 2-token prompts), noise mitigation (top 3 vs top 5), short prompt matching
+4. **`test/bridge.test.ts`** — plan parsing (with and without # title, filename fallback), feature/phase/task creation, idempotency (by planSource and by title), identity on created tasks, error cases (no file, no phases, no title)
 
 ---
 
@@ -260,16 +246,15 @@ Each change gets its own test file:
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `src/commands/hook.ts` | Modify | Smart pre-edit errors, subagent awareness |
-| `src/lib/hooks.ts` | Modify | Title inference, identity reading, `getAllActiveWork`, adaptive decision matching |
-| `src/commands/done.ts` | Modify | File grouping heuristics, suggested split commands |
-| `src/commands/why.ts` | Modify | Action line display |
+| `src/commands/hook.ts` | Modify | Smart pre-edit errors with inferred titles and identity flags |
+| `src/lib/hooks.ts` | Modify | Title inference helper, identity reading for error messages, adaptive decision matching |
+| `src/commands/done.ts` | Modify | File grouping heuristics, suggested split commands with identity |
+| `src/commands/why.ts` | Modify | Action line display in decision output |
 | `src/commands/decide.ts` | Modify | `--action` flag |
-| `src/lib/types.ts` | Modify | `action` field on Decision type |
+| `src/lib/types.ts` | Modify | `action` field on Decision, `planSource` field on Feature |
 | `src/commands/bridge.ts` | New | Plan import command |
 | `src/cli.tsx` | Modify | Register `bridge` command |
 | `test/smart-errors.test.ts` | New | Tests for Change 1 |
 | `test/scope-recovery.test.ts` | New | Tests for Change 2 |
-| `test/subagent-awareness.test.ts` | New | Tests for Change 3 |
-| `test/decision-context.test.ts` | New | Tests for Change 4 |
-| `test/bridge.test.ts` | New | Tests for Change 5 |
+| `test/decision-context.test.ts` | New | Tests for Change 3 |
+| `test/bridge.test.ts` | New | Tests for Change 4 |
