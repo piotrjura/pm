@@ -361,16 +361,17 @@ ${idSuffix ? `\n  IMPORTANT: Always pass ${idSuffix.trim()} on every pm command 
   - Distinct stages (design, implement, test) = separate phases
   - When in doubt, start with add-issue — upgrade later if scope grows`]
 
-    // Even without active work, surface relevant decisions from past work
+    // Surface relevant decisions from past work — BEFORE the instructions
     if (decisionsOn) {
       const relevant = findRelevantDecisions(prompt ?? '', allDecisions)
       if (relevant.length > 0) {
         parts.push('')
-        parts.push('  Prior decisions relevant to this prompt — review before proceeding:')
+        parts.push('  ⚠ DECISIONS — you MUST follow these unless the user explicitly overrides:')
         for (const d of relevant) {
-          parts.push(`  - "${d.decision}"${d.reasoning ? ` (${d.reasoning})` : ''} [from ${d.source}]`)
+          parts.push(`  - "${d.decision}"${d.reasoning ? ` (${d.reasoning})` : ''}`)
+          if (d.action) parts.push(`    → ${d.action}`)
+          parts.push(`    [from ${d.source}]`)
         }
-        parts.push('  These are context from prior work, not hard rules. If the user\'s request conflicts, follow the user.')
       }
     }
 
@@ -412,44 +413,39 @@ ${idSuffix ? `\n  IMPORTANT: Always pass ${idSuffix.trim()} on every pm command 
     }
   }
 
-  // Current task/feature decisions
-  if (decisionsOn && taskDecisions.length > 0) {
-    lines.push('')
-    lines.push('  Decisions (current work):')
-    for (const d of taskDecisions) {
-      lines.push(`  - ${d.decision}${d.reasoning ? ` — ${d.reasoning}` : ''}`)
-    }
-  }
-
-  // Prompt-aware: surface decisions from OTHER tasks/features that match what's being discussed
+  // Decisions — FIRST after status, most important context for the agent
   if (decisionsOn) {
+    const allDecisionEntries: Array<{ decision: string; reasoning?: string; action?: string; source?: string }> = []
+
+    // Current task/feature decisions (always relevant)
+    for (const d of taskDecisions) {
+      allDecisionEntries.push(d)
+    }
+
+    // Prompt-matched decisions from other work
     const relevant = findRelevantDecisions(prompt ?? '', allDecisions)
-    // Filter out decisions already shown from current task
     const taskDecisionTexts = new Set(taskDecisions.map(d => d.decision))
-    const extra = relevant.filter(d => !taskDecisionTexts.has(d.decision))
-    if (extra.length > 0) {
-      lines.push('')
-      lines.push('  Prior decisions relevant to this prompt:')
-      for (const d of extra) {
-        lines.push(`  - "${d.decision}"${d.reasoning ? ` (${d.reasoning})` : ''} [from ${d.source}]`)
+    for (const d of relevant) {
+      if (!taskDecisionTexts.has(d.decision)) {
+        allDecisionEntries.push({ ...d, source: d.source })
       }
-      lines.push('  These are context from prior work, not hard rules. If the user\'s request conflicts, follow the user.')
+    }
+
+    if (allDecisionEntries.length > 0) {
+      lines.push('')
+      lines.push('  ⚠ DECISIONS — you MUST follow these unless the user explicitly overrides:')
+      for (const d of allDecisionEntries) {
+        lines.push(`  - "${d.decision}"${d.reasoning ? ` (${d.reasoning})` : ''}`)
+        if (d.action) lines.push(`    → ${d.action}`)
+        if (d.source) lines.push(`    [from ${d.source}]`)
+      }
     }
   }
 
-  // Identity reminder — always present when identity is known
+  // Identity reminder
   if (idSuffix) {
     lines.push('')
     lines.push(`  Identity: always pass ${idSuffix.trim()} on pm commands (done, decide, add-issue, start, etc.)`)
-  }
-
-  // Decision protocol — only when decisions enabled
-  if (decisionsOn) {
-    lines.push('')
-    lines.push('  Decisions: context, not law. Prior decisions inform your approach but the user\'s current request takes priority.')
-    lines.push('  - `pm why "keyword"` — check if a prior decision exists before choosing an approach')
-    lines.push('  - `pm decide <id> "what" --reasoning "why"` — record new decisions')
-    lines.push('  - `pm forget "text"` — remove an outdated decision')
   }
 
   // Scope tracking
