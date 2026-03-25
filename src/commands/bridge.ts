@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { basename } from 'node:path'
-import { addFeature, updateFeature, addPhaseToFeature, addTaskToPhase, loadStore } from '../lib/store.js'
+import { addFeature, updateFeature, addPhaseToFeature, addTaskToPhase, loadStore, addDecision } from '../lib/store.js'
 import { parseFlag } from '../lib/args.js'
 
 interface ParsedTask {
@@ -117,10 +117,70 @@ function parsePlan(content: string, filename: string): ParsedPlan | { error: str
   return { title, phases }
 }
 
+export interface ParsedDecision {
+  decision: string
+  reasoning?: string
+  action?: string
+}
+
+/** Parse decision markers from a superpowers spec markdown file.
+ *  Format: `> **Decision:** text`, optionally followed by `> **Why:**` and `> **Action:**` lines. */
+export function parseSpecDecisions(content: string): ParsedDecision[] {
+  const lines = content.split('\n')
+  const decisions: ParsedDecision[] = []
+  let current: ParsedDecision | null = null
+  let currentField: 'decision' | 'reasoning' | 'action' = 'decision'
+
+  const flush = () => {
+    if (current) {
+      current.decision = current.decision.trim()
+      if (current.reasoning) current.reasoning = current.reasoning.trim()
+      if (current.action) current.action = current.action.trim()
+      decisions.push(current)
+      current = null
+    }
+  }
+
+  for (const line of lines) {
+    if (line.startsWith('> **Decision:**')) {
+      flush()
+      current = { decision: line.replace('> **Decision:**', '').trim() }
+      currentField = 'decision'
+      continue
+    }
+
+    if (current && line.startsWith('>')) {
+      const text = line.slice(1).trim()
+
+      if (text.startsWith('**Why:**')) {
+        current.reasoning = text.replace('**Why:**', '').trim()
+        currentField = 'reasoning'
+      } else if (text.startsWith('**Action:**')) {
+        current.action = text.replace('**Action:**', '').trim()
+        currentField = 'action'
+      } else if (text) {
+        if (currentField === 'decision') {
+          current.decision += ' ' + text
+        } else if (currentField === 'reasoning') {
+          current.reasoning = (current.reasoning ?? '') + ' ' + text
+        } else if (currentField === 'action') {
+          current.action = (current.action ?? '') + ' ' + text
+        }
+      }
+      continue
+    }
+
+    if (current) flush()
+  }
+
+  flush()
+  return decisions
+}
+
 export function cmdBridge(args: string[]) {
   const planPath = args[0]
   if (!planPath) {
-    console.error('Usage: pm bridge <plan-file> [--agent <name>] [--model <name>]')
+    console.error('Usage: pm bridge <plan-file> [--spec <spec-file>] [--agent <name>] [--model <name>]')
     process.exit(1)
   }
 
@@ -180,6 +240,35 @@ export function cmdBridge(args: string[]) {
   lines.push('Start work:')
   const idSuffix = [agent && `--agent ${agent}`, model && `--model ${model}`].filter(Boolean).join(' ')
   lines.push(`  pm start ${firstTaskId ?? '?'}${idSuffix ? ' ' + idSuffix : ''}`)
+
+  // Handle --spec flag: extract decisions from spec file
+  const hasSpec = args.includes('--spec')
+  const specPath = parseFlag(args, '--spec')
+  if (hasSpec && !specPath) {
+    console.error('Missing spec file path after --spec')
+    process.exit(1)
+  }
+  if (specPath) {
+    if (!existsSync(specPath)) {
+      console.error(`Spec file not found: ${specPath}`)
+      process.exit(1)
+    }
+
+    const specContent = readFileSync(specPath, 'utf-8')
+    const decisions = parseSpecDecisions(specContent)
+
+    if (decisions.length === 0) {
+      lines.push('')
+      lines.push("No decisions found in spec. Mark decisions with '> **Decision:** text'")
+    } else {
+      lines.push('')
+      lines.push(`Extracted ${decisions.length} decision${decisions.length === 1 ? '' : 's'} from spec:`)
+      for (const d of decisions) {
+        addDecision(feature.id, d.decision, d.reasoning, d.action)
+        lines.push(`  - "${d.decision}" → feature ${feature.id}`)
+      }
+    }
+  }
 
   console.log(lines.join('\n'))
 }

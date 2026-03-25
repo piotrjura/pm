@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createTestDir, cleanupTestDir, pm, loadData } from './helpers.js'
+import { parseSpecDecisions } from '../src/commands/bridge.js'
 
 let cwd: string
 beforeEach(() => { cwd = createTestDir() })
@@ -126,5 +127,116 @@ describe('pm bridge — output includes start command', () => {
 
     expect(stdout).toContain('pm start')
     expect(stdout).toContain('--agent claude-code')
+  })
+})
+
+describe('parseSpecDecisions', () => {
+  it('extracts decision with all fields', () => {
+    const content = `# Spec
+> **Decision:** Use explicit markers
+> **Why:** Heuristics produce false positives
+> **Action:** Parse blockquote markers
+
+Some other text.
+`
+    const decisions = parseSpecDecisions(content)
+    expect(decisions).toHaveLength(1)
+    expect(decisions[0].decision).toBe('Use explicit markers')
+    expect(decisions[0].reasoning).toBe('Heuristics produce false positives')
+    expect(decisions[0].action).toBe('Parse blockquote markers')
+  })
+
+  it('extracts decision with only required field', () => {
+    const content = `> **Decision:** Keep it simple\n\nMore text.`
+    const decisions = parseSpecDecisions(content)
+    expect(decisions).toHaveLength(1)
+    expect(decisions[0].decision).toBe('Keep it simple')
+    expect(decisions[0].reasoning).toBeUndefined()
+    expect(decisions[0].action).toBeUndefined()
+  })
+
+  it('extracts multiple decisions', () => {
+    const content = `> **Decision:** First choice
+> **Why:** Reason one
+
+> **Decision:** Second choice
+> **Why:** Reason two
+`
+    const decisions = parseSpecDecisions(content)
+    expect(decisions).toHaveLength(2)
+    expect(decisions[0].decision).toBe('First choice')
+    expect(decisions[1].decision).toBe('Second choice')
+  })
+
+  it('handles continuation lines in Why field', () => {
+    const content = `> **Decision:** Use markers
+> **Why:** Because free-form markdown is ambiguous
+> and would produce false positives
+> **Action:** Parse blockquotes
+`
+    const decisions = parseSpecDecisions(content)
+    expect(decisions[0].reasoning).toBe('Because free-form markdown is ambiguous and would produce false positives')
+    expect(decisions[0].action).toBe('Parse blockquotes')
+  })
+
+  it('returns empty array when no markers found', () => {
+    const content = `# Just a spec\n\nNo decisions here.`
+    expect(parseSpecDecisions(content)).toEqual([])
+  })
+})
+
+describe('pm bridge --spec flag', () => {
+  it('extracts decisions from spec into feature', () => {
+    const planPath = writePlan(cwd, SIMPLE_PLAN)
+    const specContent = `# Spec
+> **Decision:** Use hooks for tracking
+> **Why:** Reliable and extensible
+> **Action:** Always configure hooks on init
+`
+    const specPath = join(cwd, 'spec.md')
+    writeFileSync(specPath, specContent)
+
+    const { stdout, exitCode } = pm(`bridge ${planPath} --spec ${specPath}`, cwd)
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain('Extracted 1 decision')
+    expect(stdout).toContain('Use hooks for tracking')
+
+    const data = loadData(cwd)
+    const decisions = data.features[0].decisions
+    expect(decisions).toHaveLength(1)
+    expect(decisions[0].decision).toBe('Use hooks for tracking')
+    expect(decisions[0].reasoning).toBe('Reliable and extensible')
+    expect(decisions[0].action).toBe('Always configure hooks on init')
+  })
+
+  it('warns when spec has no decision markers', () => {
+    const planPath = writePlan(cwd, SIMPLE_PLAN)
+    const specPath = join(cwd, 'empty-spec.md')
+    writeFileSync(specPath, '# Just a title\n\nNo decisions.')
+
+    const { stdout, exitCode } = pm(`bridge ${planPath} --spec ${specPath}`, cwd)
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain('No decisions found in spec')
+  })
+
+  it('errors when spec file not found', () => {
+    const planPath = writePlan(cwd, SIMPLE_PLAN)
+    const { stdout, exitCode } = pm(`bridge ${planPath} --spec /nonexistent/spec.md`, cwd)
+    expect(exitCode).toBe(1)
+    expect(stdout).toContain('Spec file not found')
+  })
+
+  it('errors when --spec flag has no value', () => {
+    const planPath = writePlan(cwd, SIMPLE_PLAN)
+    const { stdout, exitCode } = pm(`bridge ${planPath} --spec`, cwd)
+    expect(exitCode).toBe(1)
+    expect(stdout).toContain('Missing spec file path')
+  })
+
+  it('works without --spec flag (backward compat)', () => {
+    const planPath = writePlan(cwd, SIMPLE_PLAN)
+    const { stdout, exitCode } = pm(`bridge ${planPath}`, cwd)
+    expect(exitCode).toBe(0)
+    expect(stdout).not.toContain('Extracted')
   })
 })
