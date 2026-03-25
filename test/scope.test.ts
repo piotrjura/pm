@@ -38,7 +38,7 @@ describe('scope enforcement on pm done (tasks)', () => {
 
     const { stdout, exitCode } = pm(`done ${taskId}`, cwd)
     expect(exitCode).toBe(1)
-    expect(stdout).toContain('SCOPE VIOLATION')
+    expect(stdout).toContain('SCOPE:')
     expect(stdout).toContain('5 files edited')
 
     // Task should still be in-progress
@@ -78,7 +78,7 @@ describe('scope enforcement on pm done (tasks)', () => {
 
     const { stdout, exitCode } = pm(`done ${taskId}`, cwd)
     expect(exitCode).toBe(1)
-    expect(stdout).toContain('SCOPE VIOLATION')
+    expect(stdout).toContain('SCOPE:')
   })
 
   it('allows done when session belongs to different task', () => {
@@ -110,8 +110,8 @@ describe('scope enforcement on pm done (issues)', () => {
 
     const { stdout, exitCode } = pm(`done ${issueId}`, cwd)
     expect(exitCode).toBe(1)
-    expect(stdout).toContain('SCOPE VIOLATION')
-    expect(stdout).toContain('add-feature')
+    expect(stdout).toContain('SCOPE:')
+    expect(stdout).toContain('add-issue')
 
     // Issue should still be triage (not done)
     const data = loadData(cwd)

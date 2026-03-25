@@ -1,5 +1,5 @@
 import { markTaskDone, markIssueDone, loadStore } from '../lib/store.js'
-import { loadSession, SCOPE_WARN_FILES } from '../lib/hooks.js'
+import { loadSession, SCOPE_WARN_FILES, loadIdentityFlags } from '../lib/hooks.js'
 import { parseFlag, hasFlag } from '../lib/args.js'
 
 export function cmdDone(args: string[]) {
@@ -76,6 +76,85 @@ export function cmdDone(args: string[]) {
   }
 }
 
+export interface FileGroup {
+  name: string
+  files: string[]
+}
+
+/** Check if a path is a test file. */
+function isTestFile(p: string): boolean {
+  return p.includes('/test/') || p.includes('/__tests__/') || p.includes('.test.') || p.includes('.spec.')
+}
+
+/** Group files by concern. Test files go to their own group (highest priority), then by directory name. */
+export function groupFilesByConcern(files: string[]): FileGroup[] {
+  const testFiles = files.filter(isTestFile)
+  const sourceFiles = files.filter(f => !isTestFile(f))
+
+  const groups: FileGroup[] = []
+
+  // Group source files by immediate parent directory name
+  const byDir = new Map<string, string[]>()
+  for (const f of sourceFiles) {
+    const parts = f.replace(/\\/g, '/').split('/')
+    const dir = parts.length >= 2 ? parts[parts.length - 2] : 'root'
+    const existing = byDir.get(dir) ?? []
+    existing.push(f)
+    byDir.set(dir, existing)
+  }
+  for (const [dir, dirFiles] of byDir) {
+    groups.push({ name: dir, files: dirFiles })
+  }
+
+  // Test files always last
+  if (testFiles.length > 0) {
+    groups.push({ name: 'tests', files: testFiles })
+  }
+
+  return groups
+}
+
+/** Build the scope error message with grouped files and copy-paste recovery commands. */
+export function buildScopeErrorMessage(
+  activeId: string,
+  type: 'task' | 'issue',
+  files: string[],
+  idFlags: string,
+): string {
+  const groups = groupFilesByConcern(files)
+  const idSuffix = idFlags ? ` ${idFlags}` : ''
+
+  const lines: string[] = [
+    `SCOPE: ${files.length} files edited under one ${type} (limit: ${SCOPE_WARN_FILES - 1}).`,
+    ``,
+    `Files by concern:`,
+  ]
+
+  for (const g of groups) {
+    lines.push(`  ${g.name}: ${g.files.join(', ')}`)
+  }
+
+  lines.push(``)
+  lines.push(`To complete this work:`)
+  lines.push(`  1. pm done ${activeId} --force --note "what was completed"`)
+
+  let step = 2
+  for (const g of groups) {
+    if (g.name === 'tests') {
+      lines.push(`  ${step}. pm add-issue "Add tests"${idSuffix}`)
+    } else {
+      lines.push(`  ${step}. pm add-issue "Update ${g.name}"${idSuffix}`)
+    }
+    step++
+  }
+
+  lines.push(``)
+  lines.push(`Or if this is legitimately one change:`)
+  lines.push(`  pm done ${activeId} --force`)
+
+  return lines.join('\n')
+}
+
 /** Check if the session file count exceeds the scope threshold.
  *  Returns an error message if over limit, null if OK. */
 function checkScope(cwd: string, activeId: string, type: 'task' | 'issue'): string | null {
@@ -83,24 +162,6 @@ function checkScope(cwd: string, activeId: string, type: 'task' | 'issue'): stri
   if (!session || session.activeId !== activeId) return null
   if (session.files.length < SCOPE_WARN_FILES) return null
 
-  const lines = [
-    `SCOPE VIOLATION: ${session.files.length} files edited under one ${type} (limit: ${SCOPE_WARN_FILES - 1}).`,
-    ``,
-    `Files: ${session.files.join(', ')}`,
-    ``,
-    `This ${type} is too broad. Break remaining work into additional focused tasks:`,
-  ]
-
-  if (type === 'issue') {
-    lines.push(`  1. Mark this issue done with --force and a note on what was completed`)
-    lines.push(`  2. Run: pm add-feature "..." to upgrade, then add phases/tasks for remaining work`)
-  } else {
-    lines.push(`  1. Mark this task done with --force and a note on what was completed`)
-    lines.push(`  2. Run: pm add-task to create additional focused tasks for remaining work`)
-  }
-
-  lines.push(``)
-  lines.push(`Or if this is legitimately one change: pm done ${activeId} --force`)
-
-  return lines.join('\n')
+  const idFlags = loadIdentityFlags(cwd)
+  return buildScopeErrorMessage(activeId, type, session.files, idFlags)
 }
