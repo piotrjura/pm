@@ -750,9 +750,9 @@ function matchesDecision(d: Decision, q: string): boolean {
 // Decisions
 
 /** Add a decision to a feature, task, or issue. Searches by ID across all entities. */
-export function addDecision(id: string, decision: string, reasoning?: string): Decision | null {
+export function addDecision(id: string, decision: string, reasoning?: string, action?: string): Decision | null {
   const store = loadStore()
-  const entry: Decision = { decision, reasoning, at: new Date().toISOString() }
+  const entry: Decision = { decision, reasoning, action, at: new Date().toISOString() }
 
   // Try features
   for (const feature of store.features) {

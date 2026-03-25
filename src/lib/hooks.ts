@@ -150,8 +150,10 @@ function collectAllDecisions(store: DataStore): Array<Decision & { source: strin
   return all
 }
 
-/** Find decisions whose text overlaps with the user's prompt. */
-function findRelevantDecisions(
+/** Find decisions whose text overlaps with the user's prompt.
+ *  Adaptive threshold: short prompts (1-2 tokens) require 1 overlap; longer require 2.
+ *  Noise mitigation: short-prompt matches capped at 3 results. */
+export function findRelevantDecisions(
   prompt: string,
   allDecisions: Array<Decision & { source: string }>,
 ): Array<Decision & { source: string }> {
@@ -160,23 +162,25 @@ function findRelevantDecisions(
   const promptTokens = tokenize(prompt)
   if (promptTokens.size === 0) return []
 
+  // Adaptive threshold
+  const isShortPrompt = promptTokens.size <= 2
+  const requiredOverlap = isShortPrompt ? 1 : 2
+  const maxResults = isShortPrompt ? 3 : 5
+
   const matches: Array<Decision & { source: string; score: number }> = []
   for (const d of allDecisions) {
     const decisionText = `${d.decision} ${d.reasoning ?? ''}`
     const decisionTokens = tokenize(decisionText)
-    // Count overlapping tokens
     let overlap = 0
     for (const token of decisionTokens) {
       if (promptTokens.has(token)) overlap++
     }
-    // Require at least 2 overlapping tokens to avoid noise
-    if (overlap >= 2) {
+    if (overlap >= requiredOverlap) {
       matches.push({ ...d, score: overlap })
     }
   }
 
-  // Sort by relevance, return top 5
-  return matches.sort((a, b) => b.score - a.score).slice(0, 5)
+  return matches.sort((a, b) => b.score - a.score).slice(0, maxResults)
 }
 
 interface AgentIdentity {

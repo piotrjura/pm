@@ -72,6 +72,7 @@ function printDecisions(matches: DecisionMatch[]) {
 
     console.log(`  Decision: ${m.decision.decision}`)
     if (m.decision.reasoning) console.log(`  Why: ${m.decision.reasoning}`)
+    if (m.decision.action) console.log(`  Action: ${m.decision.action}`)
     console.log(`  (${date})`)
     console.log()
   }

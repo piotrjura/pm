@@ -5,6 +5,8 @@ export interface Decision {
   decision: string
   /** Why — context, reasoning, alternatives considered */
   reasoning?: string
+  /** Concrete action directive for agents */
+  action?: string
   /** When */
   at: string
 }
@@ -49,6 +51,8 @@ export interface Feature {
   phases: Phase[]
   /** Feature-level decisions (architecture, approach, scope) */
   decisions?: Decision[]
+  /** Path to superpowers plan file this feature was imported from */
+  planSource?: string
   createdAt: string
   updatedAt: string
   doneAt?: string
