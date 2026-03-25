@@ -1,7 +1,7 @@
 # Worktree Awareness & Decision Extraction from Specs
 
 **Date:** 2026-03-25
-**Status:** Draft
+**Status:** Reviewed (v2 — addressed spec review findings)
 **Scope:** pm CLI changes only
 
 > **Decision:** Worktree path stripping is generic — not superpowers-specific
@@ -21,7 +21,7 @@
 
 ### Worktree Scope Corruption
 
-pm's `recordEdit` function normalizes file paths relative to `cwd`. When Claude Code works in a git worktree (e.g., `.worktrees/feature-branch/`), edits produce paths like `.worktrees/feature-branch/src/lib/hooks.ts`. These are counted as unique files in the main session tracker, inflating the scope count and triggering false violations.
+pm's `recordEdit` function normalizes file paths relative to `cwd`. The hook handler sets `cwd` to `CLAUDE_PROJECT_DIR` (line 17 of `hook.ts`), which is always the **main project root** — not the worktree root. When Claude Code edits files in a worktree, the absolute path is like `/project/.worktrees/branch/src/foo.ts`. After `relative(cwd, filePath)`, this becomes `.worktrees/branch/src/foo.ts` — counted as a unique file in the main session tracker, inflating the scope count and triggering false violations.
 
 ### Decisions Lost in Spec Files
 
@@ -50,15 +50,16 @@ Detection: match path segments against `.worktrees/<name>/` or `worktrees/<name>
 
 ### Where to Apply
 
-1. **`recordEdit` in `hooks.ts`** — after relativizing the path (line 296), apply `stripWorktreePath` before storing in session.files
-2. **`handlePostEdit` in `hook.ts`** — before calling `recordEdit`, strip the worktree prefix from the file path so the allowlist checks (`.pm/`, `.claude/`, `CLAUDE.md`, `/memory/`) work correctly for worktree paths
-3. **`handlePreEdit` in `hook.ts`** — same allowlist check needs worktree-stripped paths
+**Only in `recordEdit` in `hooks.ts`** — after relativizing the path (line 296), apply `stripWorktreePath` before storing in `session.files`. This is the only place where worktree paths cause problems.
+
+The allowlist checks in `handlePreEdit` and `handlePostEdit` use `.includes()` on the absolute path (e.g., `filePath.includes('.pm/')`) — these work correctly regardless of worktree prefix because they're substring matches, not prefix matches. No changes needed there.
 
 ### Edge Cases
 
-- Nested worktrees (`.worktrees/a/.worktrees/b/...`) — strip only the outermost prefix. This is extremely unlikely but the regex should handle it gracefully.
+- Nested worktrees (`.worktrees/a/.worktrees/b/...`) — strip all worktree prefixes, not just the outermost. (Practically impossible, but handle correctly.)
 - Windows backslash paths — normalize to forward slashes before matching (already done in `inferTitle`).
-- Path is just `.worktrees/branch/` with no file — return empty string, same as current behavior for empty paths.
+- Path is just `.worktrees/branch/` with no file — return empty string.
+- `stripWorktreePath` operates on **already-relativized** paths (after `relative(cwd, filePath)`). It expects inputs like `.worktrees/branch/src/foo.ts`, not absolute paths.
 
 ---
 
@@ -78,9 +79,10 @@ Parsing rules:
 - `> **Decision:**` starts a new decision block. Text after the colon is the `decision` field. **(Required)**
 - `> **Why:**` on the next blockquote line is the `reasoning` field. **(Optional)**
 - `> **Action:**` on the next blockquote line is the `action` field. **(Optional)**
-- A decision block ends at the first line that doesn't start with `>`
-- Multiple decision blocks per spec file are supported
-- Lines must start with `> **Decision:**` exactly (case-sensitive) — no variants like `> Decision:` or `> **Decided:**`
+- Continuation lines (blockquote lines that don't match `**Decision:**`, `**Why:**`, or `**Action:**`) are appended to the current field with a space.
+- A decision block ends at the first line that doesn't start with `>`, or at the next `> **Decision:**` line.
+- Multiple decision blocks per spec file are supported.
+- Lines must start with `> **Decision:**` exactly (case-sensitive).
 
 ### New Function: `parseSpecDecisions`
 
@@ -101,6 +103,8 @@ New flag: `--spec <path>`
 ```
 pm bridge plan.md --spec spec.md --agent claude-code --model claude-opus-4-6[1m]
 ```
+
+**Argument ordering:** The plan file path must be the first positional argument (before any flags). This matches the existing `cmdBridge` behavior where `args[0]` is the plan path. The `--spec` flag is parsed via `parseFlag` like other flags.
 
 After creating the feature (existing behavior), if `--spec` is provided:
 1. Read and parse the spec file
@@ -123,7 +127,9 @@ Extracted 3 decisions from spec:
 
 ### Idempotency
 
-When `pm bridge` detects an already-imported plan (by `planSource` or title match), it skips plan import. For `--spec`, it should also skip decision extraction — log: `"Already imported. Use pm show <id> to view."`
+When `pm bridge` detects an already-imported plan (by `planSource` or title match), it currently calls `process.exit(0)`. This exit happens before any `--spec` processing. This is correct — if the plan was already imported, decisions were already extracted too (or the user can re-run with just the spec flag on a fresh import).
+
+**Decision dedup:** `addDecision` in `store.ts` does not deduplicate by text. To keep it simple, we don't add dedup — the idempotency check on the plan import path prevents double-import in the normal flow. Edge case of re-importing to a different feature is acceptable (decisions are cheap, and `pm forget` exists for cleanup).
 
 ---
 
@@ -138,8 +144,7 @@ When `pm bridge` detects an already-imported plan (by `planSource` or title matc
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `src/lib/hooks.ts` | Modify | Add `stripWorktreePath`, apply in `recordEdit` |
-| `src/commands/hook.ts` | Modify | Strip worktree paths before allowlist checks and `recordEdit` |
-| `src/commands/bridge.ts` | Modify | Add `--spec` flag, `parseSpecDecisions`, decision import |
+| `src/lib/hooks.ts` | Modify | Add exported `stripWorktreePath`, apply in `recordEdit` after relativization |
+| `src/commands/bridge.ts` | Modify | Add `--spec` flag, `parseSpecDecisions`, decision import after plan creation |
 | `test/worktree-paths.test.ts` | New | Tests for worktree path stripping |
 | `test/bridge.test.ts` | Modify | Tests for spec decision extraction |
