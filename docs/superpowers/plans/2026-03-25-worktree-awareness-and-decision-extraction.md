@@ -157,11 +157,15 @@ git commit -m "feat: strip worktree path prefixes in scope tracking"
 
 - [ ] **Step 2.1: Write failing tests for `parseSpecDecisions`**
 
-Add to the end of `test/bridge.test.ts`:
+Add `parseSpecDecisions` to the imports at the **top** of `test/bridge.test.ts`:
 
 ```typescript
 import { parseSpecDecisions } from '../src/commands/bridge.js'
+```
 
+Then add the test `describe` block at the end of the file:
+
+```typescript
 describe('parseSpecDecisions', () => {
   it('extracts decision with all fields', () => {
     const content = `# Spec
@@ -353,6 +357,13 @@ describe('pm bridge --spec flag', () => {
     expect(stdout).toContain('Spec file not found')
   })
 
+  it('errors when --spec flag has no value', () => {
+    const planPath = writePlan(cwd, SIMPLE_PLAN)
+    const { stdout, exitCode } = pm(`bridge ${planPath} --spec`, cwd)
+    expect(exitCode).toBe(1)
+    expect(stdout).toContain('Missing spec file path')
+  })
+
   it('works without --spec flag (backward compat)', () => {
     const planPath = writePlan(cwd, SIMPLE_PLAN)
     const { stdout, exitCode } = pm(`bridge ${planPath}`, cwd)
@@ -385,7 +396,12 @@ After the plan import output (after line 182 `lines.push(...)` for start command
 
 ```typescript
   // Handle --spec flag: extract decisions from spec file
+  const hasSpec = args.includes('--spec')
   const specPath = parseFlag(args, '--spec')
+  if (hasSpec && !specPath) {
+    console.error('Missing spec file path after --spec')
+    process.exit(1)
+  }
   if (specPath) {
     if (!existsSync(specPath)) {
       console.error(`Spec file not found: ${specPath}`)
