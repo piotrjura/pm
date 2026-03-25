@@ -458,16 +458,7 @@ ${idSuffix ? `\n  IMPORTANT: Always pass ${idSuffix.trim()} on every pm command 
 
     if (session.files.length >= SCOPE_WARN_FILES) {
       lines.push('')
-      lines.push(`  ⚠ SCOPE VIOLATION: ${session.files.length} files edited under one ${active.type} (limit: ${SCOPE_WARN_FILES - 1}). pm done will REJECT this.`)
-      lines.push(`  Stop editing and split your work NOW:`)
-      if (active.type === 'issue') {
-        lines.push(`  1. pm done <id> --force --note "what was completed so far"`)
-        lines.push(`  2. pm add-feature "..." to upgrade, then add phases/tasks for remaining work`)
-      } else {
-        lines.push(`  1. pm done <id> --force --note "what was completed so far"`)
-        lines.push(`  2. pm add-task to create additional focused tasks for remaining work`)
-      }
-      lines.push(`  Files so far: ${session.files.join(', ')}`)
+      lines.push(`  ⚠ Scope note: ${session.files.length} files edited (guideline: ${SCOPE_WARN_FILES - 1}). Consider splitting into smaller tasks next time.`)
     }
   }
 

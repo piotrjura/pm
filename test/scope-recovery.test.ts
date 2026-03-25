@@ -54,17 +54,16 @@ describe('groupFilesByConcern', () => {
 })
 
 describe('buildScopeErrorMessage', () => {
-  it('includes identity flags in suggested commands', () => {
+  it('includes identity flags in suggested splits', () => {
     const msg = buildScopeErrorMessage('issue-abc', 'issue', ['src/lib/a.ts', 'src/lib/b.ts', 'src/lib/c.ts', 'src/lib/d.ts'], '--agent claude-code --model my-model')
     expect(msg).toContain('--agent claude-code')
-    expect(msg).toContain('pm done issue-abc --force')
-    expect(msg).toContain('pm add-issue')
+    expect(msg).toContain('SCOPE WARNING')
   })
 
-  it('includes files grouped by concern', () => {
+  it('suggests splits by concern', () => {
     const files = ['src/lib/hooks.ts', 'src/lib/store.ts', 'test/hooks.test.ts', 'test/store.test.ts']
     const msg = buildScopeErrorMessage('task-xyz', 'task', files, '')
-    expect(msg).toContain('tests:')
-    expect(msg).toContain('lib:')
+    expect(msg).toContain('Update lib')
+    expect(msg).toContain('Add tests')
   })
 })

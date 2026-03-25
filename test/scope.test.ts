@@ -20,8 +20,8 @@ function writeSession(dir: string, activeId: string, fileCount: number) {
   }))
 }
 
-describe('scope enforcement on pm done (tasks)', () => {
-  it('allows done when files < threshold', () => {
+describe('scope warnings on pm done (tasks)', () => {
+  it('allows done when files < threshold (no warning)', () => {
     const { taskId } = createFullFeature(cwd)
     pm(`start ${taskId}`, cwd)
     writeSession(cwd, taskId, 3) // under limit
@@ -29,25 +29,27 @@ describe('scope enforcement on pm done (tasks)', () => {
     const { stdout, exitCode } = pm(`done ${taskId} --note "small change"`, cwd)
     expect(exitCode).toBe(0)
     expect(stdout).toContain(`Done: task ${taskId}`)
+    expect(stdout).not.toContain('SCOPE')
   })
 
-  it('blocks done when files >= threshold', () => {
+  it('warns but still completes when files >= threshold', () => {
     const { taskId } = createFullFeature(cwd)
     pm(`start ${taskId}`, cwd)
     writeSession(cwd, taskId, 5) // over limit
 
     const { stdout, exitCode } = pm(`done ${taskId}`, cwd)
-    expect(exitCode).toBe(1)
-    expect(stdout).toContain('SCOPE:')
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain('SCOPE WARNING')
     expect(stdout).toContain('5 files edited')
+    expect(stdout).toContain(`Done: task ${taskId}`)
 
-    // Task should still be in-progress
+    // Task should be done — not stuck
     const data = loadData(cwd)
     const task = data.features[0].phases[0].tasks[0]
-    expect(task.status).toBe('in-progress')
+    expect(task.status).toBe('done')
   })
 
-  it('allows done with --force even when over threshold', () => {
+  it('allows done with --force (suppresses warning)', () => {
     const { taskId } = createFullFeature(cwd)
     pm(`start ${taskId}`, cwd)
     writeSession(cwd, taskId, 6)
@@ -55,30 +57,27 @@ describe('scope enforcement on pm done (tasks)', () => {
     const { stdout, exitCode } = pm(`done ${taskId} --force --note "legitimately big"`, cwd)
     expect(exitCode).toBe(0)
     expect(stdout).toContain(`Done: task ${taskId}`)
-
-    const data = loadData(cwd)
-    const task = data.features[0].phases[0].tasks[0]
-    expect(task.status).toBe('done')
+    expect(stdout).not.toContain('SCOPE')
   })
 
   it('allows done when no session file exists', () => {
     const { taskId } = createFullFeature(cwd)
     pm(`start ${taskId}`, cwd)
-    // No session file — should pass
 
     const { stdout, exitCode } = pm(`done ${taskId}`, cwd)
     expect(exitCode).toBe(0)
     expect(stdout).toContain(`Done: task ${taskId}`)
   })
 
-  it('allows done at exact threshold boundary (4 files)', () => {
+  it('warns at exact threshold boundary (4 files)', () => {
     const { taskId } = createFullFeature(cwd)
     pm(`start ${taskId}`, cwd)
     writeSession(cwd, taskId, 4) // exactly at SCOPE_WARN_FILES
 
     const { stdout, exitCode } = pm(`done ${taskId}`, cwd)
-    expect(exitCode).toBe(1)
-    expect(stdout).toContain('SCOPE:')
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain('SCOPE WARNING')
+    expect(stdout).toContain(`Done: task ${taskId}`)
   })
 
   it('allows done when session belongs to different task', () => {
@@ -92,7 +91,7 @@ describe('scope enforcement on pm done (tasks)', () => {
   })
 })
 
-describe('scope enforcement on pm done (issues)', () => {
+describe('scope warnings on pm done (issues)', () => {
   it('allows issue done when files < threshold', () => {
     const issue = pm('add-issue "Small fix"', cwd)
     const issueId = issue.stdout.match(/^issue:(\S+)/m)![1]
@@ -103,22 +102,22 @@ describe('scope enforcement on pm done (issues)', () => {
     expect(stdout).toContain(`Done: issue ${issueId}`)
   })
 
-  it('blocks issue done when files >= threshold', () => {
+  it('warns but still completes issue when files >= threshold', () => {
     const issue = pm('add-issue "Grew too big"', cwd)
     const issueId = issue.stdout.match(/^issue:(\S+)/m)![1]
     writeSession(cwd, issueId, 5)
 
     const { stdout, exitCode } = pm(`done ${issueId}`, cwd)
-    expect(exitCode).toBe(1)
-    expect(stdout).toContain('SCOPE:')
-    expect(stdout).toContain('add-issue')
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain('SCOPE WARNING')
+    expect(stdout).toContain(`Done: issue ${issueId}`)
 
-    // Issue should still be triage (not done)
+    // Issue should be done — not stuck
     const data = loadData(cwd)
-    expect(data.issues[0].status).not.toBe('done')
+    expect(data.issues[0].status).toBe('done')
   })
 
-  it('allows issue done with --force when over threshold', () => {
+  it('allows issue done with --force (suppresses warning)', () => {
     const issue = pm('add-issue "Big rename"', cwd)
     const issueId = issue.stdout.match(/^issue:(\S+)/m)![1]
     writeSession(cwd, issueId, 7)
@@ -126,5 +125,6 @@ describe('scope enforcement on pm done (issues)', () => {
     const { stdout, exitCode } = pm(`done ${issueId} --force`, cwd)
     expect(exitCode).toBe(0)
     expect(stdout).toContain(`Done: issue ${issueId}`)
+    expect(stdout).not.toContain('SCOPE')
   })
 })

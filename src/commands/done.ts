@@ -23,12 +23,11 @@ export function cmdDone(args: string[]) {
   const store = loadStore()
   const issue = store.issues.find(i => i.id === issueId)
   if (issue) {
-    // Scope check — block if too many files edited under one issue
+    // Scope check — warn but never block done
     if (!force) {
-      const scopeError = checkScope(cwd, issueId, 'issue')
-      if (scopeError) {
-        console.error(scopeError)
-        process.exit(1)
+      const scopeWarning = checkScope(cwd, issueId, 'issue')
+      if (scopeWarning) {
+        console.error(scopeWarning)
       }
     }
 
@@ -42,12 +41,11 @@ export function cmdDone(args: string[]) {
     return
   }
 
-  // Scope check — block if too many files edited under one task
+  // Scope check — warn but never block done
   if (!force) {
-    const scopeError = checkScope(cwd, id, 'task')
-    if (scopeError) {
-      console.error(scopeError)
-      process.exit(1)
+    const scopeWarning = checkScope(cwd, id, 'task')
+    if (scopeWarning) {
+      console.error(scopeWarning)
     }
   }
 
@@ -125,32 +123,17 @@ export function buildScopeErrorMessage(
   const idSuffix = idFlags ? ` ${idFlags}` : ''
 
   const lines: string[] = [
-    `SCOPE: ${files.length} files edited under one ${type} (limit: ${SCOPE_WARN_FILES - 1}).`,
-    ``,
-    `Files by concern:`,
+    `⚠ SCOPE WARNING: ${files.length} files edited under one ${type} (limit: ${SCOPE_WARN_FILES - 1}).`,
+    `  Completing anyway — consider splitting next time:`,
   ]
 
   for (const g of groups) {
-    lines.push(`  ${g.name}: ${g.files.join(', ')}`)
-  }
-
-  lines.push(``)
-  lines.push(`To complete this work:`)
-  lines.push(`  1. pm done ${activeId} --force --note "what was completed"`)
-
-  let step = 2
-  for (const g of groups) {
     if (g.name === 'tests') {
-      lines.push(`  ${step}. pm add-issue "Add tests"${idSuffix}`)
+      lines.push(`  - "Add tests"${idSuffix}`)
     } else {
-      lines.push(`  ${step}. pm add-issue "Update ${g.name}"${idSuffix}`)
+      lines.push(`  - "Update ${g.name}"${idSuffix}`)
     }
-    step++
   }
-
-  lines.push(``)
-  lines.push(`Or if this is legitimately one change:`)
-  lines.push(`  pm done ${activeId} --force`)
 
   return lines.join('\n')
 }
