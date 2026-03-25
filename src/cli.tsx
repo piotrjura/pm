@@ -23,6 +23,7 @@ import { cmdWhy } from './commands/why.js'
 import { cmdCleanup } from './commands/cleanup.js'
 import { cmdForget } from './commands/forget.js'
 import { cmdSettings } from './commands/settings.js'
+import { cmdBridge } from './commands/bridge.js'
 import { isDecisionsEnabled } from './lib/config.js'
 
 const [,, subcommand, ...rest] = process.argv
@@ -117,6 +118,9 @@ switch (subcommand) {
   case 'settings':
     await cmdSettings()
     break
+  case 'bridge':
+    cmdBridge(rest)
+    break
   case 'help':
   case '--help':
   case '-h':
@@ -139,7 +143,7 @@ Track work:
   pm add-phase <featureId> <title>
   pm add-task <featureId> <phaseId> <title> [--description "..."] [--files "a,b"] [--priority 1-5]
   pm add-issue <title>   [--type bug|change] [--priority urgent|high|medium|low] [--description "..."] [--model <name>]
-  pm decide <id> "decision" [--reasoning "why, trade-offs"]
+  pm decide <id> "decision" [--reasoning "why"] [--action "do this"]
   pm why [search]        List all decisions, or search — find out why something was built a certain way
   pm forget "text"       Remove a decision (exact match or search)
   pm settings            Configure features and agents
@@ -147,6 +151,7 @@ Track work:
   pm cleanup             Reset stuck tasks [--errors] [--drafts] [--all] [--quiet]
   pm recap               Briefing: active work, recent decisions, next steps
   pm update <id>         Update issue/feature [--priority urgent|high|medium|low] [--title "..."] [--description "..."]
+  pm bridge <plan-file>  Import a superpowers plan into pm feature/phase/task structure
   pm show <id>           Feature or issue detail with decisions
 `)
     break
