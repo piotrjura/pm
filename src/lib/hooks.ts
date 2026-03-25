@@ -262,6 +262,20 @@ export function loadIdentityFlags(cwd: string): string {
   return parts.join(' ')
 }
 
+/** Strip git worktree path prefixes from a relativized file path.
+ *  `.worktrees/branch/src/foo.ts` → `src/foo.ts`
+ *  `worktrees/branch/src/foo.ts` → `src/foo.ts`
+ *  `src/foo.ts` → `src/foo.ts` (unchanged)
+ *  Operates on already-relativized paths (after `relative(cwd, filePath)`). */
+export function stripWorktreePath(relPath: string): string {
+  const normalized = relPath.replace(/\\/g, '/')
+  let result = normalized
+  while (/^\.?worktrees\/[^/]+\//.test(result)) {
+    result = result.replace(/^\.?worktrees\/[^/]+\//, '')
+  }
+  return result
+}
+
 /** Load the edit session tracker. */
 export function loadSession(cwd: string): EditSession | null {
   const path = SESSION_FILE(cwd)
@@ -292,8 +306,9 @@ export function recordEdit(cwd: string, filePath: string): EditSession {
     session = { activeId, files: [], editCount: 0 }
   }
 
-  // Normalize to relative path for readability
-  const rel = filePath.startsWith(cwd) ? relative(cwd, filePath) : filePath
+  // Normalize to relative path, strip worktree prefix
+  const rawRel = filePath.startsWith(cwd) ? relative(cwd, filePath) : filePath
+  const rel = stripWorktreePath(rawRel)
   if (!session.files.includes(rel)) {
     session.files.push(rel)
   }
