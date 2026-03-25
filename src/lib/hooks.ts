@@ -203,6 +203,61 @@ function loadIdentity(cwd: string): AgentIdentity | null {
   }
 }
 
+/** Generic filenames that need their parent dir for context. */
+const GENERIC_NAMES = new Set(['types', 'index', 'utils', 'helpers', 'constants', 'config', 'schema', 'schemas'])
+/** Config file extensions that have no meaningful stem. */
+const CONFIG_EXTS = new Set(['.json', '.yaml', '.yml', '.toml', '.env'])
+
+/** Infer a human-readable issue title from a file path.
+ *  Returns undefined if no useful title can be derived. */
+export function inferTitle(filePath: string | undefined): string | undefined {
+  if (!filePath) return undefined
+  const parts = filePath.replace(/\\/g, '/').split('/')
+  const filename = parts[parts.length - 1]
+  if (!filename) return undefined
+
+  const dotIdx = filename.lastIndexOf('.')
+  const ext = dotIdx !== -1 ? filename.slice(dotIdx) : ''
+  const stem = dotIdx !== -1 ? filename.slice(0, dotIdx) : filename
+
+  // Config files: use stem as label
+  if (CONFIG_EXTS.has(ext) && stem) {
+    return `Update ${stem} config`
+  }
+
+  if (!stem) return undefined
+
+  // Generic stems: prefix with parent directory name
+  if (GENERIC_NAMES.has(stem)) {
+    const parent = parts[parts.length - 2]
+    if (!parent) return undefined
+    return `Update ${parent} ${stem}`
+  }
+
+  // Commands directory: append "command" suffix
+  const parentDir = parts[parts.length - 2]
+  if (parentDir === 'commands') {
+    return `Update ${stem} command`
+  }
+
+  return `Update ${stem}`
+}
+
+/** Build identity flag string (e.g. "--agent claude-code --model 'claude-opus-4-6[1m]'")
+ *  from the persisted identity file. Returns empty string if no identity saved. */
+export function loadIdentityFlags(cwd: string): string {
+  const identity = loadIdentity(cwd)
+  if (!identity) return ''
+  const parts: string[] = []
+  if (identity.agent) parts.push(`--agent ${identity.agent}`)
+  if (identity.model) {
+    // Quote model values containing brackets (shell special chars)
+    const model = identity.model.includes('[') ? `'${identity.model}'` : identity.model
+    parts.push(`--model ${model}`)
+  }
+  return parts.join(' ')
+}
+
 /** Load the edit session tracker. */
 export function loadSession(cwd: string): EditSession | null {
   const path = SESSION_FILE(cwd)

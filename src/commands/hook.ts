@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { execSync } from 'node:child_process'
-import { hasActiveWork, getStatusSummary, recordEdit, saveIdentity } from '../lib/hooks.js'
+import { hasActiveWork, getStatusSummary, recordEdit, saveIdentity, inferTitle, loadIdentityFlags } from '../lib/hooks.js'
 import { parseFlag } from '../lib/args.js'
 
 /**
@@ -74,12 +74,27 @@ function handlePreEdit(cwd: string, agent?: string, instance?: string) {
     process.exit(0) // allow
   }
 
-  // Block — no active work
+  // Block — no active work. Build an actionable message with inferred title + identity flags.
+  let title: string | undefined
+  try {
+    const data = JSON.parse(input)
+    const filePath: string = data?.tool_input?.file_path ?? ''
+    title = inferTitle(filePath)
+  } catch {
+    // Can't parse stdin — no title inference
+  }
+
+  const idFlags = loadIdentityFlags(cwd)
+  const idSuffix = idFlags ? ` ${idFlags}` : ''
+  const titleArg = title ? `"${title}"` : '"describe your change"'
+
   process.stderr.write(
-    `No active task in pm. Log work before editing code.\n\n` +
-    `Quick fix: run pm add-issue "description"\n` +
-    `Structured work: run pm add-feature "title", then add-phase, add-task, start\n\n` +
-    `Do this yourself — pm commands are whitelisted. Then retry the edit.`
+    `BLOCKED: No active work in pm.\n\n` +
+    `Run this to start tracking:\n` +
+    `  pm add-issue ${titleArg}${idSuffix}\n\n` +
+    `Or for larger work:\n` +
+    `  pm add-feature "Feature title" --description "..."\n\n` +
+    `Then retry your edit.`
   )
   process.exit(2) // block
 }
