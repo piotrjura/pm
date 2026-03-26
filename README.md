@@ -29,39 +29,45 @@ This is the core value. A five-session feature doesn't lose context between sess
 
 ## Install
 
+### As a Claude Code plugin (recommended)
+
+In Claude Code, run:
+
+```
+/install piotrjura/pm
+```
+
+That's it. The plugin is self-contained — hooks, skill, and CLI are all bundled. No global install needed. Start a new conversation and pm is active.
+
+### As a global CLI
+
+If you want the full TUI experience and terminal commands:
+
 ```bash
 npm install -g @piotrjura/pm
 ```
 
-Or run without installing:
+Then navigate to your project and run:
 
 ```bash
-npx @piotrjura/pm
+pm
 ```
 
-pm works with Claude Code (default) or OpenCode. During `pm init` you can choose which agent to set up, or use flags for non-interactive setup:
+The setup wizard walks through three steps:
+
+1. **Whitelist pm commands** — adds `pm *` to Claude Code's allowed commands
+2. **Set up hooks** — installs Claude Code hooks that enforce the workflow
+3. **Create data store** — initializes `.pm/data.json` in your project
+
+Both install paths work together — if you install the plugin and later add the global CLI, pm detects it and uses the global `pm` command for richer output.
+
+pm also supports OpenCode. During `pm init` you can choose which agent to set up:
 
 ```bash
 pm init              # Set up Claude Code (default)
 pm init --opencode   # Set up OpenCode
 pm init --opencode --claude-code  # Set up both
 ```
-
-## Getting started
-
-Navigate to your project and run:
-
-```bash
-pm
-```
-
-If this is a fresh project, pm detects that and launches the setup wizard. It walks through three steps:
-
-1. **Whitelist pm commands** — adds `pm *` to Claude Code's allowed commands so it can call pm without asking permission every time
-2. **Set up hooks** — installs Claude Code hooks that enforce the workflow (more on this below)
-3. **Create data store** — initializes `.pm/data.json` in your project
-
-Once setup is done, you're dropped straight into the TUI. Next time you run `pm`, it opens directly.
 
 ## How it works
 
