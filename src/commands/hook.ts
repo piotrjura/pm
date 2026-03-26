@@ -87,13 +87,14 @@ function handlePreEdit(cwd: string, agent?: string, instance?: string) {
   const idFlags = loadIdentityFlags(cwd)
   const idSuffix = idFlags ? ` ${idFlags}` : ''
   const titleArg = title ? `"${title}"` : '"describe your change"'
+  const pmCmd = process.env.CLAUDE_PLUGIN_ROOT ? 'npx @piotrjura/pm' : 'pm'
 
   process.stderr.write(
     `BLOCKED: No active work in pm.\n\n` +
     `Run this to start tracking:\n` +
-    `  pm add-issue ${titleArg}${idSuffix}\n\n` +
+    `  ${pmCmd} add-issue ${titleArg}${idSuffix}\n\n` +
     `Or for larger work:\n` +
-    `  pm add-feature "Feature title" --description "..."\n\n` +
+    `  ${pmCmd} add-feature "Feature title" --description "..."\n\n` +
     `Then retry your edit.`
   )
   process.exit(2) // block
