@@ -159,10 +159,14 @@ function handleSessionStart(cwd: string, agent?: string, instance?: string) {
   }
 
   try {
+    // Use bundled CLI when running as plugin, bare `pm` otherwise
+    const pmBin = process.env.CLAUDE_PLUGIN_ROOT
+      ? `node "${process.env.CLAUDE_PLUGIN_ROOT}/dist/cli.js"`
+      : 'pm'
     // Reset stuck tasks first
-    const cleanup = execSync('pm cleanup --quiet', { cwd, encoding: 'utf-8', timeout: 5000 })
+    const cleanup = execSync(`${pmBin} cleanup --quiet`, { cwd, encoding: 'utf-8', timeout: 5000 })
     // Then get the briefing
-    const recap = execSync('pm recap --brief', { cwd, encoding: 'utf-8', timeout: 5000 })
+    const recap = execSync(`${pmBin} recap --brief`, { cwd, encoding: 'utf-8', timeout: 5000 })
     const parts = [cleanup.trim(), recap.trim()].filter(Boolean)
     if (parts.length > 0) {
       process.stdout.write(`[pm] Session briefing — run \`pm recap\` for full details:\n${parts.join('\n')}`)
