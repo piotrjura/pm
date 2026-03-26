@@ -12,29 +12,20 @@ You install it, run `pm` in your project, and the setup wizard handles the rest.
 
 pm supports multiple Claude Code sessions working on the same project concurrently. Each session is identified automatically by hooks, and pm tracks which model is working on each task and issue.
 
-### The problem
-
-AI agents are productive but forgetful. Each session starts from zero. Without structure, they'll re-investigate decisions already made, let a "small fix" balloon into a 15-file refactor, or lose track of what was done halfway through a feature. pm solves this by giving the agent a persistent, enforced workflow — the same way a project manager keeps a team on track, except the team is an LLM.
-
-### What carries over between sessions
-
-Every session starts with a briefing. pm tells Claude what's in progress, what was done recently, and what decisions were made. Nothing gets lost.
-
-- **`pm recap`** — the agent runs this automatically on session start. It sees active tasks, recent progress, and open issues.
-- **`pm log`** — full history of everything done: which tasks were started, completed, failed, and what notes the agent left.
-- **`pm why "search term"`** — searches all recorded decisions. Before the agent re-decides something, it checks if a previous session already settled it.
-- **`pm show <id>`** — deep view of a feature with all phases, tasks, decisions, and timestamps.
-
-This is the core value. A five-session feature doesn't lose context between sessions — the agent picks up where it left off.
-
 ## Install
 
 ### As a Claude Code plugin (recommended)
 
-In Claude Code, run:
+In Claude Code, register the marketplace first:
 
 ```
-/install piotrjura/pm
+/plugin marketplace add piotrjura/pm
+```
+
+Then install the plugin:
+
+```
+/plugin install pm@pm-marketplace
 ```
 
 That's it. The plugin is self-contained — hooks, skill, and CLI are all bundled. No global install needed. Start a new conversation and pm is active.
@@ -61,6 +52,20 @@ The setup wizard walks through three steps:
 
 Both install paths work together — if you install the plugin and later add the global CLI, pm detects it and uses the global `pm` command for richer output.
 
+### The problem
+
+AI agents are productive but forgetful. Each session starts from zero. Without structure, they'll re-investigate decisions already made, let a "small fix" balloon into a 15-file refactor, or lose track of what was done halfway through a feature. pm solves this by giving the agent a persistent, enforced workflow — the same way a project manager keeps a team on track, except the team is an LLM.
+
+### What carries over between sessions
+
+Every session starts with a briefing. pm tells Claude what's in progress, what was done recently, and what decisions were made. Nothing gets lost.
+
+- **`pm recap`** — the agent runs this automatically on session start. It sees active tasks, recent progress, and open issues.
+- **`pm log`** — full history of everything done: which tasks were started, completed, failed, and what notes the agent left.
+- **`pm why "search term"`** — searches all recorded decisions. Before the agent re-decides something, it checks if a previous session already settled it.
+- **`pm show <id>`** — deep view of a feature with all phases, tasks, decisions, and timestamps.
+
+This is the core value. A five-session feature doesn't lose context between sessions — the agent picks up where it left off.
 
 ## How it works
 
