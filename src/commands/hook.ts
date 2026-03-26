@@ -1,6 +1,8 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { execSync } from 'node:child_process'
-import { hasActiveWork, getStatusSummary, recordEdit, saveIdentity, inferTitle, loadIdentityFlags } from '../lib/hooks.js'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { hasActiveWork, getStatusSummary, recordEdit, saveIdentity, inferTitle, loadIdentityFlags, getPmCmd } from '../lib/hooks.js'
 import { parseFlag } from '../lib/args.js'
 
 /**
@@ -87,7 +89,7 @@ function handlePreEdit(cwd: string, agent?: string, instance?: string) {
   const idFlags = loadIdentityFlags(cwd)
   const idSuffix = idFlags ? ` ${idFlags}` : ''
   const titleArg = title ? `"${title}"` : '"describe your change"'
-  const pmCmd = process.env.CLAUDE_PLUGIN_ROOT ? 'npx @piotrjura/pm' : 'pm'
+  const pmCmd = getPmCmd()
 
   process.stderr.write(
     `BLOCKED: No active work in pm.\n\n` +
@@ -159,21 +161,52 @@ function handleSessionStart(cwd: string, agent?: string, instance?: string) {
     saveIdentity(cwd, { agent, model, instance })
   }
 
+  const contextParts: string[] = []
+
+  // 1. Inject pm-workflow skill content (like superpowers injects using-superpowers)
+  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT
+    || join(dirname(fileURLToPath(import.meta.url)), '..')
+  const skillPath = join(pluginRoot, 'skills', 'pm-workflow', 'SKILL.md')
+  if (existsSync(skillPath)) {
+    const skillContent = readFileSync(skillPath, 'utf-8')
+    contextParts.push(skillContent)
+  }
+
+  // 2. Session briefing (cleanup + recap)
+  const pmBin = getPmCmd()
   try {
-    // Use bundled CLI when running as plugin, bare `pm` otherwise
-    const pmBin = process.env.CLAUDE_PLUGIN_ROOT
-      ? `node "${process.env.CLAUDE_PLUGIN_ROOT}/dist/cli.js"`
-      : 'pm'
-    // Reset stuck tasks first
     const cleanup = execSync(`${pmBin} cleanup --quiet`, { cwd, encoding: 'utf-8', timeout: 5000 })
-    // Then get the briefing
     const recap = execSync(`${pmBin} recap --brief`, { cwd, encoding: 'utf-8', timeout: 5000 })
     const parts = [cleanup.trim(), recap.trim()].filter(Boolean)
     if (parts.length > 0) {
-      process.stdout.write(`[pm] Session briefing — run \`pm recap\` for full details:\n${parts.join('\n')}`)
+      contextParts.push(`## Session Briefing\n${parts.join('\n')}`)
     }
   } catch {
     // pm not available or no data, skip
   }
+
+  // 3. When running as plugin, tell the agent the exact pm command to use
+  //    so skill references to bare `pm` get resolved correctly.
+  if (process.env.CLAUDE_PLUGIN_ROOT) {
+    contextParts.push(`**pm command:** Run all pm commands as: \`${pmBin}\`\nExample: \`${pmBin} add-issue "description" --agent claude-code\``)
+    try {
+      execSync('command -v pm', { encoding: 'utf-8', timeout: 2000 })
+    } catch {
+      contextParts.push('Note: For the full TUI experience, install globally: npm install -g @piotrjura/pm')
+    }
+  }
+
+  // Output as additionalContext JSON (same format as superpowers)
+  if (contextParts.length > 0) {
+    const context = contextParts.join('\n\n')
+    const output = {
+      hookSpecificOutput: {
+        hookEventName: 'SessionStart',
+        additionalContext: context,
+      },
+    }
+    process.stdout.write(JSON.stringify(output))
+  }
+
   process.exit(0)
 }

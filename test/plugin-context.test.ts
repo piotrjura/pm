@@ -50,7 +50,8 @@ describe('lazy config init', () => {
     expect(existsSync(configPath)).toBe(true)
 
     const config = JSON.parse(readFileSync(configPath, 'utf-8'))
-    expect(config.decisions).toBe(true)
+    expect(config.planning).toBe('medium')
+    expect(config.questions).toBe('medium')
     expect(config.agents).toContain('claude-code')
   })
 })

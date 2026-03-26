@@ -69,7 +69,7 @@ export function App() {
   const nav = useNavigation()
   const store = useStore()
 
-  const decisionsEnabled = config.decisions
+  // decisions are always enabled — no config toggle
 
   const handleInit = useCallback(() => {
     const cwd = process.cwd()
@@ -119,7 +119,7 @@ export function App() {
 
   // Collect all decisions from store for the decisions screen
   const allDecisions = useMemo<DecisionMatch[]>(() => {
-    if (!decisionsEnabled) return []
+    // decisions are always collected
     const matches: DecisionMatch[] = []
     for (const feature of store.store.features) {
       for (const d of feature.decisions ?? []) {
@@ -140,7 +140,7 @@ export function App() {
     }
     matches.sort((a, b) => b.decision.at.localeCompare(a.decision.at))
     return matches
-  }, [store.store.features, store.store.issues, decisionsEnabled])
+  }, [store.store.features, store.store.issues])
 
   useInput((input, key) => {
     if (!initialized) return
@@ -184,7 +184,7 @@ export function App() {
             featureProgress={store.featureProgress}
             onSelectFeature={(id, state) => nav.openFeature(id, state)}
             onSelectIssue={(id, state) => nav.openIssue(id, state)}
-            onOpenDecisions={decisionsEnabled ? () => nav.openDecisions() : undefined}
+            onOpenDecisions={() => nav.openDecisions()}
             onOpenSettings={() => nav.openSettings()}
             initialCursor={nav.listState.cursor}
             initialPage={nav.listState.page}
@@ -193,7 +193,6 @@ export function App() {
             onDeleteFeature={(id) => store.removeFeature(id)}
             onAddIssue={(title) => store.createIssue(title)}
             onDeleteIssue={(id) => store.removeIssue(id)}
-            decisionsEnabled={decisionsEnabled}
           />
         ) : nav.screen.type === 'feature-detail' ? (
           (() => {
@@ -240,7 +239,7 @@ export function App() {
           />
         ) : null}
       </Box>
-      <StatusBar screen={nav.screen} width={cols} decisionsEnabled={decisionsEnabled} />
+      <StatusBar screen={nav.screen} width={cols} />
     </Box>
   )
 }

@@ -24,7 +24,7 @@ import { cmdCleanup } from './commands/cleanup.js'
 import { cmdForget } from './commands/forget.js'
 import { cmdSettings } from './commands/settings.js'
 import { cmdBridge } from './commands/bridge.js'
-import { isDecisionsEnabled } from './lib/config.js'
+// decisions are always enabled — no config toggle needed
 
 const [,, subcommand, ...rest] = process.argv
 
@@ -86,10 +86,6 @@ switch (subcommand) {
     cmdUpdate(rest)
     break
   case 'decide':
-    if (!isDecisionsEnabled()) {
-      console.log('Decisions are disabled. Enable with: pm settings')
-      break
-    }
     cmdDecide(rest)
     break
   case 'recap':
@@ -99,20 +95,12 @@ switch (subcommand) {
     cmdHook(rest)
     break
   case 'why':
-    if (!isDecisionsEnabled()) {
-      console.log('Decisions are disabled. Enable with: pm settings')
-      break
-    }
     cmdWhy(rest)
     break
   case 'cleanup':
     cmdCleanup(rest)
     break
   case 'forget':
-    if (!isDecisionsEnabled()) {
-      console.log('Decisions are disabled. Enable with: pm settings')
-      break
-    }
     cmdForget(rest)
     break
   case 'settings':

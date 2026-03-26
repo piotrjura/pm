@@ -101,8 +101,12 @@ export interface DataStore {
   log: LogEntry[]
 }
 
+export type PlanningLevel = 'none' | 'medium' | 'all'
+export type QuestionsLevel = 'none' | 'medium' | 'thorough'
+
 export interface Config {
-  decisions: boolean
+  planning: PlanningLevel
+  questions: QuestionsLevel
   agents: string[]
 }
 

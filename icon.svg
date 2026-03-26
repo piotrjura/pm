@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Antenna tip -->
+  <circle cx="32" cy="4" r="3.5" fill="#33ff00"/>
+
+  <!-- Antenna stalk -->
+  <rect x="30.5" y="4" width="3" height="11" fill="#33ff00"/>
+
+  <!-- CRT screen — outer shell -->
+  <rect x="6" y="14" width="52" height="42" rx="6" fill="#33ff00"/>
+  <!-- CRT screen — inner (black screen) -->
+  <rect x="9" y="17" width="46" height="36" rx="3.5" fill="#111"/>
+
+  <!-- Pixel eyes -->
+  <rect x="18" y="26" width="10" height="8" rx="1" fill="#33ff00"/>
+  <rect x="36" y="26" width="10" height="8" rx="1" fill="#33ff00"/>
+
+  <!-- Oscilloscope mouth — single clean polygon -->
+  <polygon points="18,42.5 23.5,37.5 28,44 32,35.5 36,44 40.5,37.5 46,42.5 46,45.5 40.5,40.5 36,47 32,38.5 28,47 23.5,40.5 18,45.5" fill="#33ff00"/>
+</svg>

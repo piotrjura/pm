@@ -24,6 +24,7 @@ function sourceLabel(source: DecisionMatch['source']): string {
 
 export function DecisionsList({ decisions, height, onBack, onDelete }: DecisionsListProps) {
   const [cursor, setCursor] = useState(0)
+  const [page, setPage] = useState(0)
   const [search, setSearch] = useState('')
   const [searchMode, setSearchMode] = useState(false)
 
@@ -37,40 +38,41 @@ export function DecisionsList({ decisions, height, onBack, onDelete }: Decisions
     )
   }, [decisions, search])
 
-  const clamp = (c: number) => Math.max(0, Math.min(filtered.length - 1, c))
+  const showSearchBar = searchMode || !!search
+  // Each decision takes 2-3 lines; calculate page size from available height
+  const availableHeight = height - 4 - (showSearchBar ? 2 : 0)
+  const pageSize = Math.max(1, Math.floor(availableHeight / 3))
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
+  const clampedPage = Math.min(page, totalPages - 1)
+  const pageItems = filtered.slice(clampedPage * pageSize, (clampedPage + 1) * pageSize)
+  const clamp = (c: number) => Math.max(0, Math.min(pageItems.length - 1, c))
 
   useInput((input, key) => {
     if (searchMode) {
       if (key.escape) { setSearch(''); setSearchMode(false) }
       else if (key.backspace || key.delete) setSearch(s => s.slice(0, -1))
       else if (key.return) setSearchMode(false)
-      else if (input && !key.ctrl && !key.meta) { setSearch(s => s + input); setCursor(0) }
+      else if (input && !key.ctrl && !key.meta) { setSearch(s => s + input); setCursor(0); setPage(0) }
       return
     }
     if (key.upArrow) setCursor(c => clamp(c - 1))
     else if (key.downArrow) setCursor(c => clamp(c + 1))
+    else if (input === '[' || key.pageUp) { setPage(p => Math.max(0, p - 1)); setCursor(0) }
+    else if (input === ']' || key.pageDown) { setPage(p => Math.min(totalPages - 1, p + 1)); setCursor(0) }
     else if (input === '/') setSearchMode(true)
     else if (key.escape) {
-      if (search) { setSearch(''); setCursor(0) }
+      if (search) { setSearch(''); setCursor(0); setPage(0) }
       else onBack()
     }
     else if (input === 'b') onBack()
-    else if (input === 'd' && filtered.length > 0) {
-      const item = filtered[cursor]
+    else if (input === 'd' && pageItems.length > 0) {
+      const item = pageItems[cursor]
       if (item) {
         onDelete(item.decision.decision)
-        setCursor(c => clamp(Math.min(c, filtered.length - 2)))
+        setCursor(c => clamp(Math.min(c, pageItems.length - 2)))
       }
     }
   })
-
-  const showSearchBar = searchMode || !!search
-  // Each decision takes 2-3 lines; calculate visible items
-  const availableHeight = height - 4 - (showSearchBar ? 2 : 0)
-  // Estimate ~3 lines per decision (source + decision + reasoning/spacing)
-  const visibleCount = Math.max(1, Math.floor(availableHeight / 3))
-  const scrollOffset = Math.max(0, cursor - visibleCount + 1)
-  const visibleItems = filtered.slice(scrollOffset, scrollOffset + visibleCount)
 
   return (
     <Box flexDirection="column" width="100%" height={height}>
@@ -84,6 +86,10 @@ export function DecisionsList({ decisions, height, onBack, onDelete }: Decisions
           )}
         </Box>
 
+        {totalPages > 1 && (
+          <Text dimColor>pg {clampedPage + 1}/{totalPages}</Text>
+        )}
+
         {filtered.length === 0 && !search && (
           <Box flexDirection="column" gap={1}>
             <Text dimColor>No decisions recorded yet.</Text>
@@ -95,14 +101,13 @@ export function DecisionsList({ decisions, height, onBack, onDelete }: Decisions
           <Text dimColor>No decisions matching "{search}"</Text>
         )}
 
-        {visibleItems.map((m, i) => {
-          const realIdx = scrollOffset + i
-          const isCursor = realIdx === cursor
+        {pageItems.map((m, i) => {
+          const isCursor = i === cursor
           const src = m.source
           const age = relativeDate(m.decision.at)
 
           return (
-            <Box key={realIdx} flexDirection="column" marginBottom={isCursor ? 1 : 0}>
+            <Box key={i} flexDirection="column" marginBottom={isCursor ? 1 : 0}>
               <Box>
                 <Text color="cyan">{isCursor ? '› ' : '  '}</Text>
                 <Text bold={isCursor} color={isCursor ? 'white' : undefined}>
@@ -129,10 +134,10 @@ export function DecisionsList({ decisions, height, onBack, onDelete }: Decisions
           )
         })}
 
-        {filtered.length > visibleCount && (
+        {filtered.length > pageSize && (
           <Box marginTop={1}>
             <Text dimColor>
-              {scrollOffset + 1}–{Math.min(scrollOffset + visibleCount, filtered.length)} of {filtered.length}
+              {clampedPage * pageSize + 1}–{Math.min((clampedPage + 1) * pageSize, filtered.length)} of {filtered.length}  []page
             </Text>
           </Box>
         )}

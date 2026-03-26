@@ -6,7 +6,5 @@
   "author": { "name": "Piotr Jura" },
   "homepage": "https://github.com/piotrjura/pm",
   "repository": "https://github.com/piotrjura/pm",
-  "license": "MIT",
-  "skills": "../skills/",
-  "hooks": "../hooks/hooks.json"
+  "license": "MIT"
 }

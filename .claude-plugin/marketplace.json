@@ -1,0 +1,15 @@
+{
+  "name": "pm-marketplace",
+  "owner": {
+    "name": "Piotr Jura",
+    "url": "https://github.com/piotrjura"
+  },
+  "plugins": [
+    {
+      "name": "pm",
+      "source": { "source": "github", "repo": "piotrjura/pm" },
+      "description": "Lightweight project tracking for AI coding agents. Decisions, tasks, work history — persistent context across sessions. Configurable planning depth without the overhead.",
+      "version": "0.2.0"
+    }
+  ]
+}

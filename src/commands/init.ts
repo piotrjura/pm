@@ -61,7 +61,7 @@ function cmdInitNonInteractive(args: string[]) {
     console.log(`  \u2713 opencode            plugin ${pluginResult}`)
   }
 
-  console.log(`  \u2713 config              decisions=${config.decisions}, agents=[${config.agents.join(', ')}]`)
+  console.log(`  \u2713 config              planning=${config.planning}, questions=${config.questions}, agents=[${config.agents.join(', ')}]`)
 
   console.log()
   if (!force) {

@@ -1,131 +1,165 @@
 ---
 name: pm-workflow
-description: Use when tracking work, planning tasks, logging issues, recording decisions, or when pm hook context says to log work before coding. Covers all pm commands, scope rules, decision tracking, and adaptive pre-work guidance based on workflow depth setting.
+description: Use when tracking work, planning tasks, logging issues, recording decisions, or when pm hook context says to log work before coding. Enforces planning depth and question asking based on per-project settings. Decisions are always active.
 ---
 
 # PM Workflow
 
 PM is a persistent project manager for AI coding agents. It tracks work across sessions so each conversation continues where the last left off.
 
-**Philosophy:** Context over ceremony. You already know how to code. PM gives you memory of what was decided and why, tracks scope, and gets out of the way.
-
-## Before You Start
-
-Run these to understand the current context:
-
-```bash
-pm recap                    # What's active, recent work, decisions
-pm why "<relevant keyword>" # Past decisions that might apply
-pm list                     # All features/issues with progress
-```
-
-If there are relevant past decisions, **follow them** unless the user explicitly overrides.
+**Philosophy:** Context over ceremony — but context is mandatory. You already know how to code. PM ensures you think before you build, using what was already decided and done.
 
 ## The Rule
 
 **Log work in pm before editing code. No exceptions.**
 
-## Quick Decision: Issue vs Feature
+## Read Project Settings
 
-**Issue** — quick fix, 1-2 files, small change:
-```bash
-pm add-issue "description" --agent claude-code
-```
-Start working immediately — the issue is your active work.
+The prompt-context hook surfaces the current settings as `planning=X, questions=Y`. If not visible, read them:
 
-**Feature** — 3+ files, multiple logical steps, distinct stages:
 ```bash
-pm add-feature "title" --description "..."
-pm add-phase <featureId> "Phase name"
-pm add-task <featureId> <phaseId> "Task name"
-pm start <taskId> --agent claude-code
+pm settings
 ```
 
-**When in doubt, start with add-issue.** Upgrade to a feature later if scope grows.
+This returns JSON with two workflow keys:
+
+| Setting | Values | What it controls |
+|---------|--------|-----------------|
+| `planning` | `none` / `medium` / `all` | When mandatory planning kicks in |
+| `questions` | `none` / `medium` / `thorough` | How many clarifying questions to ask |
+
+These settings are **binding**. Follow them exactly.
+
+---
+
+## Planning Enforcement
+
+### `planning: none`
+
+No mandatory planning. Just track work:
+1. Size the request → `pm add-issue` or `pm add-feature`
+2. Start coding.
+
+### `planning: medium` (default)
+
+**Small changes** (quick fix, 1-2 files) — no planning required. Log and go.
+
+**Medium/large changes** (3+ files, multi-step, new feature) — mandatory planning:
+
+1. **Pull context** — run these and read the output:
+   ```bash
+   pm recap
+   pm why "<keyword>"    # Try 2-3 keywords related to the work
+   pm list
+   ```
+2. **Synthesize and present** — tell the user what you understand before creating any tasks:
+   - **Goal:** What are we building? (1-2 sentences)
+   - **Prior context:** Relevant decisions, past work, constraints
+   - **Approach:** How you'll implement (bullet points)
+   - **Conflicts:** Any contradictions with prior decisions
+   - **Open questions:** What the user needs to decide
+3. **Wait for confirmation** — do not create tasks until the user confirms or adjusts.
+4. **Structure** — create feature/phases/tasks.
+5. **Record decisions** — any non-obvious choices from planning.
+
+### `planning: all`
+
+**Every change**, regardless of size, gets the full planning flow above. Even a one-file fix gets context pull + synthesize + confirm before you start.
+
+---
+
+## Questions Enforcement
+
+### `questions: none`
+
+Do not ask clarifying questions. Infer intent from the request and prior context. Make decisions, record them with `pm decide`, and proceed.
+
+### `questions: medium` (default)
+
+Ask clarifying questions scaled to change size:
+- **Small changes:** 0-1 questions (only if genuinely ambiguous)
+- **Medium changes:** 1-2 questions (scope, constraints)
+- **Large changes:** 2-3 questions (approach, priorities, tradeoffs)
+
+### `questions: thorough`
+
+Ask more questions to ensure deep alignment:
+- **Small changes:** 1-2 questions
+- **Medium changes:** 2-4 questions
+- **Large changes:** 3-5 questions covering goals, constraints, approach, tradeoffs, and priorities
+
+---
+
+## Decisions
+
+Decisions are **always active**. There is no toggle. If a decision is wrong, remove it with `pm forget`.
+
+### You MUST:
+- Run `pm why "<keyword>"` before proposing solutions — check what was already decided
+- Follow existing decisions unless the user explicitly overrides
+- Record new decisions when you make non-obvious choices:
+  ```bash
+  pm decide <id> "What was decided" --reasoning "Why" --action "What to do"
+  ```
+
+### Conflict resolution:
+1. Surface the conflict: "You previously decided X because Y. This new request would change that."
+2. Let the user decide.
+3. If overridden: `pm forget "old decision"`, then `pm decide` the new one.
+
+---
+
+## Sizing the Work
+
+| Size | Signal | Action |
+|------|--------|--------|
+| **Small** | Quick fix, tweak, 1-2 files | `pm add-issue` |
+| **Medium** | Feature, 3+ files, multiple steps | `pm add-feature` with phases/tasks |
+| **Large** | System redesign, cross-cutting | `pm add-feature` with multiple phases |
+
+**When in doubt, start with add-issue.** Upgrade if scope grows.
 
 ## Scope Rules
 
 - Each task = focused unit, **1-3 files**, one logical change
-- 4+ files = this should be a feature with multiple tasks, not a single issue
+- 4+ files = split into multiple tasks
 - Distinct stages (design, implement, test) = separate phases
 - PM warns at 4+ files per task — take the hint and split
 
 ## Task Lifecycle
 
-| Command | What it does |
-|---------|-------------|
-| `pm start <id>` | Mark task/issue in-progress |
-| `pm done <id> --note "what changed"` | Mark complete with summary |
-| `pm error <id> --note "what failed"` | Mark as failed |
-| `pm retry <id>` | Re-queue a failed task |
-| `pm review <id>` | Submit for human review |
-
-**Always pass `--agent claude-code`** on every pm command.
-
-## Decisions
-
-Record design decisions so future sessions don't re-litigate them:
-
 ```bash
-pm decide <id> "What was decided" --reasoning "Why" --action "What to do"
+pm start <id> --agent claude-code --model <model>
+# ... do the work ...
+pm done <id> --note "what changed" --agent claude-code --model <model>
 ```
 
-Search past decisions before investigating:
-```bash
-pm why "keyword"
-```
+Other lifecycle commands:
+- `pm error <id> --note "what failed"` — mark failed
+- `pm retry <id>` — re-queue failed task
+- `pm review <id>` — submit for human review
 
-Remove outdated decisions:
-```bash
-pm forget "decision text"
-```
+**Always pass `--agent` and `--model` flags** on every pm command.
 
-**When you make a non-obvious choice** (architecture, library, approach), record it immediately with `pm decide`. Future sessions will thank you.
-
-## Status & Context
+## Status Commands
 
 | Command | What it shows |
 |---------|--------------|
 | `pm list` | All features/issues with progress |
-| `pm show <id>` | Detail view of a feature/issue |
+| `pm show <id>` | Detail view with decisions |
 | `pm log` | Recent activity log |
-| `pm recap` | Session briefing (active work, next steps, decisions) |
-| `pm next` | Next pending task (priority-aware) |
+| `pm recap` | Session briefing |
+| `pm next` | Next pending task |
 
-## Bridging Plans
-
-Import an existing spec or plan into pm's feature/phase/task structure:
+## Bridging External Plans
 
 ```bash
 pm bridge <plan-file.md>             # Import plan
-pm bridge <plan-file.md> --spec      # Also extract decisions from spec
+pm bridge <plan-file.md> --spec      # Also extract decisions
 ```
 
 ## Settings
 
 ```bash
-pm settings                          # View/toggle settings via TUI
+pm settings                          # TUI: cycle planning/questions, toggle agents
 ```
-
-## Adaptive Pre-Work Guidance
-
-When invoked before starting work, adapt your guidance to the situation:
-
-**For small changes** (user asks for a quick fix or tweak):
-- Just `pm add-issue`, check for relevant decisions, start coding
-- Don't over-plan a one-file change
-
-**For medium changes** (user describes a feature or multi-file change):
-- Ask 2-3 quick questions to understand scope and constraints
-- Check `pm why` for related past decisions
-- Record any design choices as decisions
-- Suggest feature/phase/task decomposition if needed
-
-**For large changes** (user describes a significant feature or system redesign):
-- Brief design conversation — 5 minutes, not 30
-- Focus on: what's the goal, what are the constraints, what's the approach
-- Record key decisions
-- Decompose into feature with phases and tasks
-- If there's an existing spec, use `pm bridge` to import it
-
-**The user is always in control.** If they want to skip guidance and just build, let them. PM enforces logging work, not process.

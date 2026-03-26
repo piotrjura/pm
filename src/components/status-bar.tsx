@@ -5,7 +5,6 @@ import type { Screen } from '../hooks/use-navigation.js'
 interface StatusBarProps {
   screen: Screen
   width: number
-  decisionsEnabled?: boolean
 }
 
 // A hint where the key is embedded in the label.
@@ -17,23 +16,19 @@ interface Hint {
   keyLen: number
 }
 
-function getHints(screen: Screen, decisionsEnabled?: boolean): Hint[] {
+function getHints(screen: Screen): Hint[] {
   switch (screen.type) {
-    case 'list': {
-      const hints: Hint[] = [
+    case 'list':
+      return [
         { prefix: '↑↓', label: 'navigate', keyLen: 0 },
         { prefix: '⏎', label: 'open', keyLen: 0 },
         { label: '/search', keyLen: 1 },
-      ]
-      if (decisionsEnabled) hints.push({ label: 'why', keyLen: 1 })
-      hints.push(
+        { label: 'why', keyLen: 1 },
         { label: 'settings', keyLen: 1 },
         { label: '[]page', keyLen: 2 },
         { label: 'delete', keyLen: 1 },
         { label: 'quit', keyLen: 1 },
-      )
-      return hints
-    }
+      ]
     case 'feature-detail':
       return [
         { prefix: '↑↓', label: 'task', keyLen: 0 },
@@ -49,6 +44,7 @@ function getHints(screen: Screen, decisionsEnabled?: boolean): Hint[] {
       return [
         { prefix: '↑↓', label: 'navigate', keyLen: 0 },
         { label: '/search', keyLen: 1 },
+        { label: '[]page', keyLen: 2 },
         { label: 'delete', keyLen: 1 },
         { prefix: 'esc', label: 'back', keyLen: 0 },
         { label: 'quit', keyLen: 1 },
@@ -67,8 +63,8 @@ function hintWidth(h: Hint): number {
   return (h.prefix ? h.prefix.length + 1 : 0) + h.label.length
 }
 
-export function StatusBar({ screen, width, decisionsEnabled }: StatusBarProps) {
-  const hints = getHints(screen, decisionsEnabled)
+export function StatusBar({ screen, width }: StatusBarProps) {
+  const hints = getHints(screen)
   const separator = '──'
   const paddingX = 2
   const gaps = (hints.length + 1) * 2 // gap=2 between each item

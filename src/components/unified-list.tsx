@@ -49,7 +49,6 @@ interface UnifiedListProps {
   onOpenDecisions?: () => void
   onOpenSettings: () => void
   onDeleteIssue: (id: string) => void
-  decisionsEnabled?: boolean
   initialCursor?: number
   initialPage?: number
   initialSearch?: string
@@ -67,7 +66,6 @@ export function UnifiedList({
   onOpenSettings,
   onDeleteFeature,
   onDeleteIssue,
-  decisionsEnabled = true,
   initialCursor = 0,
   initialPage = 0,
   initialSearch = '',
@@ -123,7 +121,7 @@ export function UnifiedList({
       if (item?.kind === 'feature') onSelectFeature(item.feature.id, state)
       else if (item?.kind === 'issue') onSelectIssue(item.issue.id, state)
     }
-    else if (input === 'w' && decisionsEnabled && onOpenDecisions) { onOpenDecisions() }
+    else if (input === 'w' && onOpenDecisions) { onOpenDecisions() }
     else if (input === 's') { onOpenSettings() }
     else if (input === 'd' && pageItems.length > 0) {
       const item = pageItems[cursor]
@@ -142,12 +140,10 @@ export function UnifiedList({
   const doneIssues = issues.filter(i => i.status === 'done').length
   const openIssues = issues.filter(i => i.status !== 'done').length
   const totalIssues = issues.length
-  const totalDecisions = decisionsEnabled
-    ? features.reduce((sum, f) => {
-        return sum + (f.decisions?.length ?? 0) +
-          f.phases.reduce((s, p) => s + p.tasks.reduce((t, task) => t + (task.decisions?.length ?? 0), 0), 0)
-      }, 0) + issues.reduce((sum, i) => sum + (i.decisions?.length ?? 0), 0)
-    : 0
+  const totalDecisions = features.reduce((sum, f) => {
+    return sum + (f.decisions?.length ?? 0) +
+      f.phases.reduce((s, p) => s + p.tasks.reduce((t, task) => t + (task.decisions?.length ?? 0), 0), 0)
+  }, 0) + issues.reduce((sum, i) => sum + (i.decisions?.length ?? 0), 0)
   const showSearchBar = searchMode || !!search
 
   return (
@@ -211,9 +207,7 @@ export function UnifiedList({
             const typeTag = f.type === 'fix' ? '[fix]' : '[feat]'
             const statusIcon = isDone ? '✓' : '○'
             const statusColor = isDone ? 'green' : 'gray'
-            const decisionCount = decisionsEnabled
-              ? (f.decisions?.length ?? 0) + f.phases.reduce((sum, p) => sum + p.tasks.reduce((s, t) => s + (t.decisions?.length ?? 0), 0), 0)
-              : 0
+            const decisionCount = (f.decisions?.length ?? 0) + f.phases.reduce((sum, p) => sum + p.tasks.reduce((s, t) => s + (t.decisions?.length ?? 0), 0), 0)
             const activeTask = isActive
               ? f.phases.flatMap(p => p.tasks).find(t => t.status === 'in-progress')
               : undefined
@@ -275,7 +269,7 @@ export function UnifiedList({
           const issueType = iss.type ?? 'bug'
           const issueColor = issueType === 'change' ? 'cyan' : 'red'
           const issueTag = `[${issueType}]`
-          const issueDecisions = decisionsEnabled ? (iss.decisions?.length ?? 0) : 0
+          const issueDecisions = iss.decisions?.length ?? 0
           return (
             <Box key={iss.id} flexDirection="column">
               <Box>

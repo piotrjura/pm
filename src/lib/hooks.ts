@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import type { DataStore, Decision } from './types.js'
-import { isDecisionsEnabled } from './config.js'
+import { loadConfig } from './config.js'
 
 const PM_DATA = (cwd: string) => join(cwd, '.pm', 'data.json')
 const SESSION_FILE = (cwd: string) => join(cwd, '.pm', 'session.json')
@@ -189,6 +189,15 @@ interface AgentIdentity {
   instance?: string
 }
 
+/** Return the pm command string appropriate for the current context.
+ *  Plugin mode → bundled CLI via absolute path. Global install → bare `pm`. */
+export function getPmCmd(): string {
+  if (process.env.CLAUDE_PLUGIN_ROOT) {
+    return `node "${process.env.CLAUDE_PLUGIN_ROOT}/dist/cli.js"`
+  }
+  return 'pm'
+}
+
 /** Save the agent identity for the current session so prompt-context can reference it. */
 export function saveIdentity(cwd: string, identity: AgentIdentity): void {
   const pmDir = join(cwd, '.pm')
@@ -334,8 +343,8 @@ export function getStatusSummary(cwd: string, agent?: string, instance?: string,
 
   const active = getActiveId(store, agent, instance)
   const session = loadSession(cwd)
-  const decisionsOn = isDecisionsEnabled(cwd)
-  const allDecisions = decisionsOn ? collectAllDecisions(store) : []
+  const allDecisions = collectAllDecisions(store)
+  const config = loadConfig(cwd)
 
   // Build identity flags string from persisted identity (saved at SessionStart)
   const identity = loadIdentity(cwd)
@@ -347,26 +356,26 @@ export function getStatusSummary(cwd: string, agent?: string, instance?: string,
   // === No active work — tell Claude to assess scope and log work itself ===
   if (!active) {
     const isPlugin = !!process.env.CLAUDE_PLUGIN_ROOT
+    const pmCmd = getPmCmd()
 
     if (isPlugin) {
       // Slim output — skill has the full playbook
       const parts = [`[pm] No active work tracked. You MUST log work in pm before editing any code.
 
-  Quick fix: pm add-issue "description"${idSuffix}
-  Structured: pm add-feature "title" → pm add-phase → pm add-task → pm start${idSuffix}
+  Quick fix: ${pmCmd} add-issue "description"${idSuffix}
+  Structured: ${pmCmd} add-feature "title" → ${pmCmd} add-phase → ${pmCmd} add-task → ${pmCmd} start${idSuffix}
 ${idSuffix ? `\n  Always pass ${idSuffix.trim()} on every pm command.` : ''}
-  Use the pm-workflow skill for full command reference and scope rules.`]
+  Use the pm-workflow skill for full command reference and scope rules.
+  Workflow settings: planning=${config.planning}, questions=${config.questions}`]
 
-      if (decisionsOn) {
-        const relevant = findRelevantDecisions(prompt ?? '', allDecisions)
-        if (relevant.length > 0) {
-          parts.push('')
-          parts.push('  ⚠ DECISIONS — you MUST follow these unless the user explicitly overrides:')
-          for (const d of relevant) {
-            parts.push(`  - "${d.decision}"${d.reasoning ? ` (${d.reasoning})` : ''}`)
-            if (d.action) parts.push(`    → ${d.action}`)
-            parts.push(`    [from ${d.source}]`)
-          }
+      const relevantPlugin = findRelevantDecisions(prompt ?? '', allDecisions)
+      if (relevantPlugin.length > 0) {
+        parts.push('')
+        parts.push('  ⚠ DECISIONS — you MUST follow these unless the user explicitly overrides:')
+        for (const d of relevantPlugin) {
+          parts.push(`  - "${d.decision}"${d.reasoning ? ` (${d.reasoning})` : ''}`)
+          if (d.action) parts.push(`    → ${d.action}`)
+          parts.push(`    [from ${d.source}]`)
         }
       }
 
@@ -377,29 +386,28 @@ ${idSuffix ? `\n  Always pass ${idSuffix.trim()} on every pm command.` : ''}
     const parts = [`[pm] No active work tracked. You MUST log work in pm before editing any code. Assess the scope of the user's request and run the appropriate commands yourself:
 
   Quick one-off fix (1-2 files, small change):
-    Run: pm add-issue "description"${idSuffix}
+    Run: ${pmCmd} add-issue "description"${idSuffix}
 
   Structured work (3+ files, multiple logical steps):
-    Run: pm add-feature "title" --description "..."
-    Then: pm add-phase, pm add-task, pm start <taskId>${idSuffix}
+    Run: ${pmCmd} add-feature "title" --description "..."
+    Then: ${pmCmd} add-phase, ${pmCmd} add-task, ${pmCmd} start <taskId>${idSuffix}
 ${idSuffix ? `\n  IMPORTANT: Always pass ${idSuffix.trim()} on every pm command (add-issue, add-feature, start, done, decide, etc.) to record who did the work.` : ''}
   Scope rules:
   - Each task = focused unit, 1-3 files, one logical change
   - 4+ files = feature with multiple tasks, not a single issue
   - Distinct stages (design, implement, test) = separate phases
-  - When in doubt, start with add-issue — upgrade later if scope grows`]
+  - When in doubt, start with add-issue — upgrade later if scope grows
+  Workflow: planning=${config.planning}, questions=${config.questions}`]
 
-    // Surface relevant decisions from past work
-    if (decisionsOn) {
-      const relevant = findRelevantDecisions(prompt ?? '', allDecisions)
-      if (relevant.length > 0) {
-        parts.push('')
-        parts.push('  ⚠ DECISIONS — you MUST follow these unless the user explicitly overrides:')
-        for (const d of relevant) {
-          parts.push(`  - "${d.decision}"${d.reasoning ? ` (${d.reasoning})` : ''}`)
-          if (d.action) parts.push(`    → ${d.action}`)
-          parts.push(`    [from ${d.source}]`)
-        }
+    // Surface relevant decisions from past work (always on)
+    const relevantFull = findRelevantDecisions(prompt ?? '', allDecisions)
+    if (relevantFull.length > 0) {
+      parts.push('')
+      parts.push('  ⚠ DECISIONS — you MUST follow these unless the user explicitly overrides:')
+      for (const d of relevantFull) {
+        parts.push(`  - "${d.decision}"${d.reasoning ? ` (${d.reasoning})` : ''}`)
+        if (d.action) parts.push(`    → ${d.action}`)
+        parts.push(`    [from ${d.source}]`)
       }
     }
 
@@ -441,32 +449,30 @@ ${idSuffix ? `\n  IMPORTANT: Always pass ${idSuffix.trim()} on every pm command 
     }
   }
 
-  // Decisions — FIRST after status, most important context for the agent
-  if (decisionsOn) {
-    const allDecisionEntries: Array<{ decision: string; reasoning?: string; action?: string; source?: string }> = []
+  // Decisions — FIRST after status, most important context for the agent (always on)
+  const allDecisionEntries: Array<{ decision: string; reasoning?: string; action?: string; source?: string }> = []
 
-    // Current task/feature decisions (always relevant)
-    for (const d of taskDecisions) {
-      allDecisionEntries.push(d)
+  // Current task/feature decisions (always relevant)
+  for (const d of taskDecisions) {
+    allDecisionEntries.push(d)
+  }
+
+  // Prompt-matched decisions from other work
+  const relevant = findRelevantDecisions(prompt ?? '', allDecisions)
+  const taskDecisionTexts = new Set(taskDecisions.map(d => d.decision))
+  for (const d of relevant) {
+    if (!taskDecisionTexts.has(d.decision)) {
+      allDecisionEntries.push({ ...d, source: d.source })
     }
+  }
 
-    // Prompt-matched decisions from other work
-    const relevant = findRelevantDecisions(prompt ?? '', allDecisions)
-    const taskDecisionTexts = new Set(taskDecisions.map(d => d.decision))
-    for (const d of relevant) {
-      if (!taskDecisionTexts.has(d.decision)) {
-        allDecisionEntries.push({ ...d, source: d.source })
-      }
-    }
-
-    if (allDecisionEntries.length > 0) {
-      lines.push('')
-      lines.push('  ⚠ DECISIONS — you MUST follow these unless the user explicitly overrides:')
-      for (const d of allDecisionEntries) {
-        lines.push(`  - "${d.decision}"${d.reasoning ? ` (${d.reasoning})` : ''}`)
-        if (d.action) lines.push(`    → ${d.action}`)
-        if (d.source) lines.push(`    [from ${d.source}]`)
-      }
+  if (allDecisionEntries.length > 0) {
+    lines.push('')
+    lines.push('  ⚠ DECISIONS — you MUST follow these unless the user explicitly overrides:')
+    for (const d of allDecisionEntries) {
+      lines.push(`  - "${d.decision}"${d.reasoning ? ` (${d.reasoning})` : ''}`)
+      if (d.action) lines.push(`    → ${d.action}`)
+      if (d.source) lines.push(`    [from ${d.source}]`)
     }
   }
 

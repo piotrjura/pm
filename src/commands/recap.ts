@@ -1,17 +1,14 @@
 import { loadStore, getLog, getNextTask, getFeatureProgress } from '../lib/store.js'
 import { hasFlag } from '../lib/args.js'
 import type { DataStore, Feature, Issue } from '../lib/types.js'
-import { isDecisionsEnabled } from '../lib/config.js'
-
 /** Generate a briefing for session onboarding or manual review. */
 export function cmdRecap(args: string[] = []) {
   const brief = hasFlag(args, '--brief')
   const store = loadStore()
-  const decisionsOn = isDecisionsEnabled()
   const lines: string[] = []
 
   // In-progress work (highest priority)
-  const inProgress = collectInProgress(store.features, store.issues, decisionsOn)
+  const inProgress = collectInProgress(store.features, store.issues)
   if (inProgress.length > 0) {
     lines.push('## In Progress')
     lines.push('')
@@ -46,7 +43,7 @@ export function cmdRecap(args: string[] = []) {
         const status = f.status === 'done' ? 'DONE' : `${done}/${total}`
         lines.push(`  [${status}] ${f.title}`)
         if (!brief && f.description) lines.push(`    ${f.description}`)
-        if (decisionsOn && f.decisions?.length) {
+        if (f.decisions?.length) {
           for (const d of f.decisions) {
             lines.push(`    Decision: ${d.decision}`)
             if (!brief && d.reasoning) lines.push(`      Why: ${d.reasoning}`)
@@ -63,7 +60,7 @@ export function cmdRecap(args: string[] = []) {
     lines.push('## Open Issues')
     for (const i of activeIssues) {
       lines.push(`  [${i.priority}] ${i.title}`)
-      if (decisionsOn && i.decisions?.length) {
+      if (i.decisions?.length) {
         for (const d of i.decisions) lines.push(`    Decision: ${d.decision}`)
       }
     }
@@ -90,13 +87,11 @@ export function cmdRecap(args: string[] = []) {
   }
 
   // Decision count hint — remind Claude that pm why exists
-  if (decisionsOn) {
-    const decisionCount = countDecisions(store)
-    if (decisionCount > 0) {
-      lines.push(`## Decisions`)
-      lines.push(`  ${decisionCount} recorded decision${decisionCount === 1 ? '' : 's'} — search with: pm why "keyword"`)
-      lines.push('')
-    }
+  const decisionCount = countDecisions(store)
+  if (decisionCount > 0) {
+    lines.push(`## Decisions`)
+    lines.push(`  ${decisionCount} recorded decision${decisionCount === 1 ? '' : 's'} — search with: pm why "keyword"`)
+    lines.push('')
   }
 
   if (lines.length === 0) {
@@ -108,7 +103,7 @@ export function cmdRecap(args: string[] = []) {
   console.log(lines.join('\n'))
 }
 
-function collectInProgress(features: Feature[], issues: Issue[], decisionsOn = true): string[] {
+function collectInProgress(features: Feature[], issues: Issue[]): string[] {
   const lines: string[] = []
 
   for (const feature of features) {
@@ -123,7 +118,7 @@ function collectInProgress(features: Feature[], issues: Issue[], decisionsOn = t
           const metaLabel = meta ? ` [${meta}]` : ''
           lines.push(`    → Task: "${task.title}" (${phase.title})${metaLabel}`)
           if (task.description) lines.push(`      ${task.description}`)
-          if (decisionsOn && task.decisions?.length) {
+          if (task.decisions?.length) {
             for (const d of task.decisions) {
               lines.push(`      Decision: ${d.decision}`)
             }
@@ -138,7 +133,7 @@ function collectInProgress(features: Feature[], issues: Issue[], decisionsOn = t
       const meta = [issue.agent, issue.model].filter(Boolean).join('/')
       const metaLabel = meta ? ` [${meta}]` : ''
       lines.push(`  Issue: "${issue.title}" [${issue.priority}]${metaLabel}`)
-      if (decisionsOn && issue.decisions?.length) {
+      if (issue.decisions?.length) {
         for (const d of issue.decisions) lines.push(`    Decision: ${d.decision}`)
       }
     }
