@@ -1,19 +1,56 @@
 # PM as a Claude Code Plugin
 
-**Date:** 2026-03-25
+**Date:** 2026-03-25 (updated 2026-03-26)
 **Status:** Draft
 
 ## Problem
 
-PM requires manual setup: `npm install -g @piotrjura/pm` followed by `pm init` to write hooks and permissions into `.claude/settings.json`. This friction discourages adoption. The CC plugin marketplace offers a one-step install that handles hooks, permissions, and skill discovery automatically.
+Two problems, one plugin:
 
-## Decision
+1. **Installation friction** — pm requires `npm install -g` + `pm init`. The CC plugin marketplace offers one-step install.
 
-Package pm as a Claude Code plugin using the monorepo approach — plugin manifest, skills, and hook wrappers live alongside the existing CLI source. The npm distribution stays for power users and non-CC environments.
+2. **Superpowers is too heavy** — brainstorming → spec → review loops → plan → review loops → execute burns 100k+ tokens and 30+ minutes before a line of code is written. That's fine for large team projects, but it blocks experimentation and kills velocity for solo developers and smaller changes. Most work doesn't need a 20-page spec — it needs *context from previous sessions* and *guardrails while building*.
 
-## Plugin Structure
+## Vision
 
-New files added to the existing pm repo:
+**pm plugin = lightweight alternative to superpowers.** Not a process — a safety net.
+
+Superpowers says: "Invest in planning upfront → save time later."
+pm says: "Claude already knows how to code. Give it memory of what you decided and why, track scope, get out of the way."
+
+The plugin provides:
+- **Automatic context** — decisions, recent work, and task state injected every session via hooks
+- **Scope enforcement** — pre-edit blocking, scope warnings, task decomposition nudges
+- **Optional depth** — a skill for when you *want* to think first, not forced ceremony
+- **Configurable intensity** — TUI settings let users choose their workflow level
+- **Persistence** — decisions survive across sessions, searchable, manageable via TUI
+
+## Workflow Depth Levels (TUI-configurable)
+
+| Level | What happens | Who it's for |
+|-------|-------------|-------------|
+| **Minimal** | Track work + scope warnings. Log before editing, `pm done` when finished. | Experienced developers who want tracking without process |
+| **Guided** | Skill asks 2-3 quick questions before you start. Records decisions. Suggests task splits when scope grows. | Default for most users |
+| **Thorough** | Design conversation, generates a brief spec, bridges into pm tasks. Closest to superpowers but still faster. | Large features, team handoffs, when you genuinely need to think first |
+
+Users configure their preferred level in the TUI (`pm settings`). The plugin skill adapts its behavior based on the setting.
+
+## What Makes This Different From Superpowers
+
+| Aspect | Superpowers | pm plugin |
+|--------|-----------|-----------|
+| **Before coding** | Mandatory: brainstorm → spec → review → plan → review | Optional: skill asks a few questions if you want, or just `pm add-issue` and go |
+| **Persistent memory** | None — each session starts cold | Decisions, tasks, work history survive across sessions |
+| **Spec documents** | Always generated, multi-page, reviewed by subagent | Optional. If generated, brief. Can bridge into pm tasks |
+| **Token cost** | 100k+ before first line of code | Near zero — hooks inject context automatically |
+| **Time to first edit** | 30+ minutes for any non-trivial feature | Seconds (log work → start coding) |
+| **Review loops** | Mandatory subagent dispatches | Optional `pm done --review` |
+| **Visibility** | Heavy process, many steps | Almost invisible — hooks run silently, skill on demand |
+| **Management** | No UI — specs and plans are markdown files | TUI shows everything, lets you manage decisions/tasks interactively |
+
+## Plugin Architecture
+
+### Structure
 
 ```
 pm/
@@ -21,19 +58,19 @@ pm/
 │   └── plugin.json               # CC plugin manifest
 ├── skills/
 │   └── pm-workflow/
-│       └── SKILL.md              # workflow primer skill
+│       └── SKILL.md              # workflow + optional design guidance
 ├── hooks/
 │   ├── hooks.json                # hook declarations for CC
 │   ├── session-start             # bash wrapper
 │   ├── pre-edit                  # bash wrapper
 │   ├── post-edit                 # bash wrapper
 │   └── prompt-context            # bash wrapper
-├── dist/cli.js                   # existing bundled CLI (used by hook wrappers)
+├── dist/cli.js                   # existing bundled CLI
 ├── src/                          # existing CLI source
 ├── package.json                  # existing (updated files field)
 ```
 
-## Plugin Manifest
+### Plugin Manifest
 
 `.claude-plugin/plugin.json`:
 
@@ -41,7 +78,7 @@ pm/
 {
   "name": "pm",
   "displayName": "PM — Project Manager for AI Agents",
-  "description": "Persistent project tracking across sessions. Log work before coding, track scope, record decisions, bridge plans.",
+  "description": "Persistent project tracking across sessions. Log work before coding, track scope, record decisions. Lightweight alternative to heavy planning workflows.",
   "version": "0.2.0",
   "author": { "name": "Piotr Jura" },
   "homepage": "https://github.com/piotrjura/pm",
@@ -52,45 +89,18 @@ pm/
 }
 ```
 
-**Path resolution:** `skills` and `hooks` paths are relative to `plugin.json`'s location (inside `.claude-plugin/`), so they use `../` to reach the repo root.
+**Path resolution:** paths relative to `plugin.json` location (inside `.claude-plugin/`).
 
-## Hook Wrappers
+### Hook Wrappers
 
-Each hook is a bash script that delegates to the bundled CLI. `CLAUDE_PLUGIN_ROOT` is provided by CC at runtime and points to the plugin's installed directory.
+Each hook delegates to the bundled CLI via `CLAUDE_PLUGIN_ROOT` (set by CC at runtime).
 
-**All four wrapper scripts:**
-
-`hooks/session-start`:
 ```bash
 #!/bin/bash
-node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" hook session-start --agent claude-code --instance $PPID "$@"
+node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" hook <subcommand> --agent claude-code --instance $PPID "$@"
 ```
 
-`hooks/pre-edit`:
-```bash
-#!/bin/bash
-node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" hook pre-edit --agent claude-code --instance $PPID "$@"
-```
-
-`hooks/post-edit`:
-```bash
-#!/bin/bash
-node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" hook post-edit --agent claude-code --instance $PPID "$@"
-```
-
-`hooks/prompt-context`:
-```bash
-#!/bin/bash
-node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" hook prompt-context --agent claude-code --instance $PPID "$@"
-```
-
-Stdin is inherited automatically by bash — CC pipes tool input JSON, the CLI reads it. `$PPID` gives the CC process PID (consistent with existing `pm init` hooks — same limitation: fragile if CC spawns through intermediate process managers).
-
-Hook descriptions:
-- `session-start` — briefing, identity capture, cleanup (timeout: 10s)
-- `pre-edit` — block edits without active work (timeout: 5s, matcher: Edit|Write)
-- `post-edit` — track edited files for scope (timeout: 5s, matcher: Edit|Write)
-- `prompt-context` — inject status + blockers (timeout: 5s, no matcher)
+Four wrappers: `session-start`, `pre-edit`, `post-edit`, `prompt-context`. Stdin inherited (CC pipes tool input JSON). `$PPID` for instance identity (same as existing `pm init` hooks).
 
 `hooks/hooks.json`:
 ```json
@@ -114,137 +124,107 @@ Hook descriptions:
 }
 ```
 
-Matchers match the existing `ensureHooks()` values: `Edit|Write` for tool hooks, no matcher for SessionStart and UserPromptSubmit.
+### Working Directory & Project Resolution
 
-## Working Directory & Project Resolution
+- `CLAUDE_PLUGIN_ROOT` — locates the bundled CLI binary only
+- `CLAUDE_PROJECT_DIR` / `process.cwd()` — finds `.pm/` data directory (existing behavior)
+- CC runs hook commands with cwd = project root
 
-**Critical:** Hook wrappers rely on the working directory being the user's project root (where `.pm/` lives), not the plugin installation directory.
+### Lazy Init
 
-- `CLAUDE_PLUGIN_ROOT` — used only to locate the bundled CLI binary (`dist/cli.js`)
-- `CLAUDE_PROJECT_DIR` / `process.cwd()` — used by the CLI to find `.pm/` data directory (existing behavior in `cmdHook()`)
+No setup step. First hook fire auto-creates `.pm/` with defaults:
+- `data.json` — via existing `ensureStore()`
+- `config.json` — **new:** `loadConfig()` persists defaults when file missing and `.pm/` dir exists
 
-CC is expected to run hook commands with cwd set to the project root. This matches CC's existing behavior for project-level hooks in `.claude/settings.json`.
+### Agent CLI Calls
 
-## Lazy Init
+- Hooks use bundled CLI: `node ${CLAUDE_PLUGIN_ROOT}/dist/cli.js` (fast, no network)
+- Agent-initiated commands use `npx @piotrjura/pm` (cached after first run)
+- Plugin declares permission: `Bash(npx @piotrjura/pm *)`
 
-No separate setup step. When a hook fires and `.pm/data.json` doesn't exist, `ensureStore()` auto-creates it with defaults:
+### Session-Start Fix
 
-```
-.pm/
-├── data.json     # { pmVersion: "0.2.0", features: [], issues: [], log: [] }
-```
+Existing `handleSessionStart` calls `execSync('pm cleanup')` and `execSync('pm recap')` — requires `pm` on PATH. Fix: when `CLAUDE_PLUGIN_ROOT` is set, use `node ${CLAUDE_PLUGIN_ROOT}/dist/cli.js` instead of bare `pm`.
 
-**Code change needed:** `config.json` is currently only created by `pm init` (via `saveConfig()`). For plugin users who skip `pm init`, lazy init must also create `config.json` with defaults when missing:
+## The PM Workflow Skill
 
-```json
-{ "decisions": true, "agents": ["claude-code"] }
-```
+Single skill at `skills/pm-workflow/SKILL.md`. This is the core differentiator from "just hooks."
 
-This requires adding a `ensureConfig()` call (or extending `ensureStore()`) to create `config.json` with defaults if it doesn't exist.
+### Philosophy
 
-## Agent CLI Calls
+The skill is **not a process to follow.** It's a contextual advisor that adapts to the user's configured depth level and the current situation.
 
-Hooks use the bundled CLI (fast, no network): `node ${CLAUDE_PLUGIN_ROOT}/dist/cli.js`.
+### What the Skill Does
 
-When Claude needs to run pm commands directly (e.g., `pm add-issue`), it uses `npx @piotrjura/pm`. The plugin declares a permission for this: `Bash(npx @piotrjura/pm *)`. First call caches the package, subsequent calls are instant.
+1. **Always available context** — pm command reference, scope rules, decision tracking. Invocable on demand, not forced.
 
-**Cold start:** The first `npx` call in a session downloads/caches the package (~164KB), which may take 3-5 seconds. Mitigation: the SessionStart hook already runs the bundled CLI, so it could warm the npx cache by running `npx @piotrjura/pm --version` in the background. However, this adds complexity — defer unless latency becomes a real problem.
+2. **Adaptive pre-work guidance** (based on TUI setting):
+   - **Minimal:** No pre-work questions. Just reminds to log work.
+   - **Guided:** Reads recent pm decisions and related work. Asks 2-3 quick questions: "What's the goal? Anything from past decisions that applies? Single issue or needs decomposition?" Records answers as decisions.
+   - **Thorough:** Brief design conversation (5-10 minutes, not 30). Can output a short spec. Bridges into pm tasks via `pm bridge`.
 
-The skill documents the `npx @piotrjura/pm` prefix for all commands.
+3. **Context surfacing** — when invoked, the skill instructs Claude to:
+   - Run `pm why "<relevant keywords>"` to find past decisions
+   - Run `pm recap` to see recent work
+   - Run `pm list` to see what's in progress
+   - Use this context to inform the current work
 
-## Session-Start Internal Commands
+4. **Scope guidance** — when hooks warn about scope creep (4+ files), the skill knows how to decompose: suggest `pm add-feature` with phases, split the current issue into multiple tasks.
 
-**Issue:** The existing `handleSessionStart` in `src/commands/hook.ts` calls `execSync('pm cleanup --quiet')` and `execSync('pm recap --brief')`. These require `pm` on `$PATH`, which plugin-only users won't have.
+### What the Skill Doesn't Do
 
-**Fix:** When `CLAUDE_PLUGIN_ROOT` is set, these internal calls must use `node ${CLAUDE_PLUGIN_ROOT}/dist/cli.js` instead of bare `pm`. The hook command handler should check for the env var and construct the correct binary path. This is a required code change.
-
-## PM Workflow Skill
-
-Single skill at `skills/pm-workflow/SKILL.md`.
-
-**Purpose:** Teach Claude how to use pm — commands, scope rules, decision tracking, lifecycle.
-
-**Triggers on:** work tracking, task planning, "log work", "how do I use pm", or when hook context says to log work before coding.
-
-**Content:**
-- The Rule: log work before editing code
-- Quick reference: add-issue vs add-feature decision tree
-- Scope rules: 1-3 files per task, 4+ = feature with phases
-- Command reference: full lifecycle (start, done, error, retry, review)
-- Decision tracking: decide, why, forget
-- Bridging superpowers plans: pm bridge usage
-- All commands use `npx @piotrjura/pm` prefix
-
-**Impact on hook output:** The UserPromptSubmit hook output slims down when running as a plugin. Instead of the current ~20-line instruction block:
-```
-[pm] No active work tracked. Log work before editing code.
-Invoke pm-workflow skill for commands and guidance.
-```
-
-When running without the plugin (npm global install), the current verbose output stays.
+- No mandatory review loops or subagent dispatches
+- No spec document generation unless user asks for thorough mode
+- No multi-step checklists that must be completed in order
+- No blocking — everything is advisory except the pre-edit hook
 
 ## Changes to Existing Code
 
 ### Modified files:
 1. **`package.json`** — add to `files` field: `".claude-plugin"`, `"skills"`, `"hooks"`
-2. **`src/lib/hooks.ts`** (prompt-context output) — detect plugin context via `CLAUDE_PLUGIN_ROOT` env var; emit slim output when skill is available, verbose output otherwise
-3. **`src/commands/hook.ts`** (session-start handler) — when `CLAUDE_PLUGIN_ROOT` is set, use `node ${CLAUDE_PLUGIN_ROOT}/dist/cli.js` for internal `pm cleanup` and `pm recap` calls instead of bare `pm`
-4. **`src/lib/store.ts`** (or new `ensureConfig()`) — create `config.json` with defaults when missing (for lazy init without `pm init`)
+2. **`src/lib/hooks.ts`** — slim prompt-context output when `CLAUDE_PLUGIN_ROOT` set (skill available)
+3. **`src/commands/hook.ts`** — use bundled CLI for internal commands in plugin context
+4. **`src/lib/config.ts`** — lazy-create `config.json` with defaults when missing
 
 ### New files:
-1. `.claude-plugin/plugin.json` — plugin manifest
-2. `skills/pm-workflow/SKILL.md` — workflow primer skill
-3. `hooks/hooks.json` — hook declarations
-4. `hooks/session-start` — bash wrapper
-5. `hooks/pre-edit` — bash wrapper
-6. `hooks/post-edit` — bash wrapper
-7. `hooks/prompt-context` — bash wrapper
+1. `.claude-plugin/plugin.json`
+2. `skills/pm-workflow/SKILL.md`
+3. `hooks/hooks.json`
+4. `hooks/session-start`, `hooks/pre-edit`, `hooks/post-edit`, `hooks/prompt-context`
+5. `scripts/sync-version.js` — keeps plugin.json version in sync with package.json
 
 ### Unchanged:
 - CLI commands, data model, hook logic core
-- OpenCode support and plugin
-- npm publishing workflow
-- `pm init` (still works for non-plugin users)
-- Build step (`tsup` produces `dist/cli.js` as before)
+- OpenCode support, npm publishing, `pm init`
+- Build step
 
-## Detecting Plugin Context
+## Future: TUI Workflow Settings
 
-The CLI detects plugin context by checking `process.env.CLAUDE_PLUGIN_ROOT`. When set:
-- `pm init --claude-code` skips hook/permission installation (already handled by plugin)
-- Prompt-context hook emits slim output (skill is available)
-- Internal session-start commands use bundled CLI path instead of bare `pm`
+Not in this phase, but the next step: add a "workflow depth" setting to the TUI (`pm settings`):
 
-## Version Sync
+```
+Workflow depth:
+  ○ Minimal  — track work + scope warnings only
+  ● Guided   — quick questions before work, decisions recorded
+  ○ Thorough — design conversation, optional spec, task decomposition
+```
 
-`plugin.json` version must match `package.json` version. Strategy: add a build step that reads version from `package.json` and writes it to `.claude-plugin/plugin.json` during `tsup` build (or a simple pre-publish script). This prevents drift between npm and plugin marketplace versions.
+The skill reads this setting and adapts. The config key would be `workflowDepth: 'minimal' | 'guided' | 'thorough'` in `.pm/config.json`.
 
 ## Distribution
 
 | Channel | Target | How |
 |---------|--------|-----|
-| CC Plugin Marketplace | Claude Code users | `/install pm` — hooks, skill, permissions, all automatic |
-| npm (`@piotrjura/pm`) | Power users, OpenCode, terminal | `npm install -g` + `pm init` — unchanged |
-| npx | Plugin agent calls | `npx @piotrjura/pm <command>` — cached after first run |
+| CC Plugin Marketplace | Claude Code users | `/install pm` — one step |
+| npm (`@piotrjura/pm`) | Power users, OpenCode | `npm install -g` + `pm init` |
+| npx | Plugin agent calls | `npx @piotrjura/pm <command>` |
 
-Both paths coexist. Plugin is the recommended path for CC users. If a user has both (ran `pm init` before installing plugin), the duplicate hooks/permissions are harmless — CC deduplicates or runs both, and pm commands are idempotent.
-
-## User Experience
-
-### Plugin user:
-1. `/install pm` in Claude Code
-2. Start a conversation — SessionStart fires, lazy-inits `.pm/` if needed, shows briefing
-3. Ask Claude to do work — prompt-context says "log work first, use pm-workflow skill"
-4. Claude invokes skill, learns commands, runs `npx @piotrjura/pm add-issue "..." --agent claude-code`
-5. Work tracked, scope monitored, decisions persisted across sessions
-
-### npm user (unchanged):
-1. `npm install -g @piotrjura/pm`
-2. `pm init` in project directory
-3. Same hook behavior, same workflow
+Both paths coexist.
 
 ## Open Questions
 
-1. **Marketplace registration** — how to register pm in the CC plugin marketplace? Need to understand the submission process.
-2. **Permission declaration** — can plugin.json declare `Bash(npx @piotrjura/pm *)` permissions, or does the user need to approve these on first use?
-3. **`CLAUDE_PLUGIN_ROOT` availability** — confirm this env var is passed to hook commands (observed in superpowers' hook scripts).
-4. **Path resolution in hooks.json** — confirm CC resolves command paths in `hooks.json` relative to the `hooks.json` file itself (not relative to `plugin.json`).
+1. **Marketplace registration** — submission process for CC plugin marketplace?
+2. **Permission declaration** — can plugin.json declare `Bash(npx @piotrjura/pm *)` permissions?
+3. **`CLAUDE_PLUGIN_ROOT` availability** — confirm env var is passed to hook commands.
+4. **Path resolution in hooks.json** — relative to hooks.json or plugin.json?
+5. **Workflow depth default** — should new installs default to "guided" or "minimal"?
