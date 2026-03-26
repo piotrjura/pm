@@ -10,7 +10,7 @@ pm gives your AI agent structure so it doesn't just dive into code and lose trac
 
 You install it, run `pm` in your project, and the setup wizard handles the rest. From that point on, your AI agent manages itself — creating tasks, logging progress, recording why it chose approach A over approach B. You just tell it what to build.
 
-pm supports multiple AI agents (Claude Code, OpenCode, etc.) working on the same project concurrently. Each agent is identified automatically by hooks, and pm tracks which agent and model is working on each task and issue.
+pm supports multiple Claude Code sessions working on the same project concurrently. Each session is identified automatically by hooks, and pm tracks which model is working on each task and issue.
 
 ### The problem
 
@@ -61,13 +61,6 @@ The setup wizard walks through three steps:
 
 Both install paths work together — if you install the plugin and later add the global CLI, pm detects it and uses the global `pm` command for richer output.
 
-pm also supports OpenCode. During `pm init` you can choose which agent to set up:
-
-```bash
-pm init              # Set up Claude Code (default)
-pm init --opencode   # Set up OpenCode
-pm init --opencode --claude-code  # Set up both
-```
 
 ## How it works
 
@@ -132,25 +125,15 @@ This is the enforcement layer. pm installs four hooks that run automatically —
 
 The hooks are non-destructive — they merge with any existing Claude Code hooks in your project.
 
-## OpenCode plugin
+## Concurrent sessions
 
-pm also supports [OpenCode](https://opencode.ai). Run `pm init --opencode` to install the plugin at `.opencode/plugins/pm.ts`. It provides equivalent enforcement:
+pm supports multiple Claude Code sessions working on the same project concurrently. Identity is tracked automatically.
 
-- `tool.execute.before` — blocks edits without active work
-- `tool.execute.after` — tracks file edits, warns on scope creep
-- `tui.prompt.append` — injects task context into prompts
+**Instance** — distinguishes concurrent sessions. Set automatically via `--instance $PPID` in hooks, so two Claude Code windows don't collide.
 
-## Multi-agent support
+**Model** — which LLM model is running (e.g., `claude-opus-4-6`, `claude-sonnet-4-6`). Captured automatically from the SessionStart hook input and persisted to `.pm/identity.json`. The prompt-context hook reminds the agent to pass `--agent` and `--model` flags on every pm command, so all tasks, issues, and log entries are tagged.
 
-pm supports multiple AI agents working on the same project concurrently. Identity is tracked automatically — you don't need to configure anything beyond `pm init`.
-
-**Agent** — which tool is running (e.g., `claude-code`, `opencode`). Set automatically by hooks via `--agent` flag.
-
-**Instance** — distinguishes concurrent sessions of the same agent. Set automatically via `--instance $PPID` in hooks, so two Claude Code windows don't collide.
-
-**Model** — which LLM model is running (e.g., `claude-opus-4-6`, `claude-sonnet-4-6`). For Claude Code, captured automatically from the SessionStart hook input and persisted to `.pm/identity.json`. The prompt-context hook then reminds the agent to pass `--agent` and `--model` flags on every pm command, so all tasks, issues, and log entries are tagged. For OpenCode, identity comes from the plugin. The `--model` flag on any command works as a manual override.
-
-All three are recorded on tasks, issues, and log entries. The TUI displays agent and model together (e.g., `claude-code/opus-4-6`).
+Both are recorded on tasks, issues, and log entries. The TUI displays model info alongside each item.
 
 ## TUI
 
@@ -195,7 +178,7 @@ pm retry <id>              Retry a failed task [--note "context"]
 pm review <id>             Request review [--approve|--reject] [--note "..."]
 ```
 
-Agent, instance, and model are auto-detected (see [Multi-agent support](#multi-agent-support)). All commands also accept `--agent`, `--model` as manual overrides.
+Agent, instance, and model are auto-detected (see [Concurrent sessions](#concurrent-sessions)). All commands also accept `--agent`, `--model` as manual overrides.
 
 Tasks can require review by adding `--review` when marking done. Failed tasks support retry with attempt tracking (default max 3 attempts).
 
@@ -230,7 +213,7 @@ Other files in `.pm/`:
 ## Requirements
 
 - Node.js 18+
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) or [OpenCode](https://opencode.ai) — pm supports both AI agents via hooks
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 
 ## License
 
