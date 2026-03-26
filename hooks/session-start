@@ -1,0 +1,2 @@
+#!/bin/bash
+node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" hook session-start --agent claude-code --instance $PPID "$@"
