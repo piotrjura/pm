@@ -346,6 +346,34 @@ export function getStatusSummary(cwd: string, agent?: string, instance?: string,
 
   // === No active work — tell Claude to assess scope and log work itself ===
   if (!active) {
+    const isPlugin = !!process.env.CLAUDE_PLUGIN_ROOT
+
+    if (isPlugin) {
+      // Slim output — skill has the full playbook
+      const parts = [`[pm] No active work tracked. You MUST log work in pm before editing any code.
+
+  Quick fix: pm add-issue "description"${idSuffix}
+  Structured: pm add-feature "title" → pm add-phase → pm add-task → pm start${idSuffix}
+${idSuffix ? `\n  Always pass ${idSuffix.trim()} on every pm command.` : ''}
+  Use the pm-workflow skill for full command reference and scope rules.`]
+
+      if (decisionsOn) {
+        const relevant = findRelevantDecisions(prompt ?? '', allDecisions)
+        if (relevant.length > 0) {
+          parts.push('')
+          parts.push('  ⚠ DECISIONS — you MUST follow these unless the user explicitly overrides:')
+          for (const d of relevant) {
+            parts.push(`  - "${d.decision}"${d.reasoning ? ` (${d.reasoning})` : ''}`)
+            if (d.action) parts.push(`    → ${d.action}`)
+            parts.push(`    [from ${d.source}]`)
+          }
+        }
+      }
+
+      return parts.join('\n')
+    }
+
+    // Full output for non-plugin users (no skill available)
     const parts = [`[pm] No active work tracked. You MUST log work in pm before editing any code. Assess the scope of the user's request and run the appropriate commands yourself:
 
   Quick one-off fix (1-2 files, small change):
@@ -361,7 +389,7 @@ ${idSuffix ? `\n  IMPORTANT: Always pass ${idSuffix.trim()} on every pm command 
   - Distinct stages (design, implement, test) = separate phases
   - When in doubt, start with add-issue — upgrade later if scope grows`]
 
-    // Surface relevant decisions from past work — BEFORE the instructions
+    // Surface relevant decisions from past work
     if (decisionsOn) {
       const relevant = findRelevantDecisions(prompt ?? '', allDecisions)
       if (relevant.length > 0) {
