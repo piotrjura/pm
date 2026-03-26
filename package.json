@@ -1,6 +1,6 @@
 {
   "name": "@piotrjura/pm",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "bin": {
     "pm": "./dist/cli.js"
