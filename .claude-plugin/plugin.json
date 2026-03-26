@@ -1,0 +1,12 @@
+{
+  "name": "pm",
+  "displayName": "PM — Project Manager for AI Agents",
+  "description": "Persistent project tracking across sessions. Log work before coding, track scope, record decisions. Lightweight alternative to heavy planning workflows.",
+  "version": "0.2.0",
+  "author": { "name": "Piotr Jura" },
+  "homepage": "https://github.com/piotrjura/pm",
+  "repository": "https://github.com/piotrjura/pm",
+  "license": "MIT",
+  "skills": "../skills/",
+  "hooks": "../hooks/hooks.json"
+}

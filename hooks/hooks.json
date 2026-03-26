@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "SessionStart": [{
+      "hooks": [{ "type": "command", "command": "./hooks/session-start", "timeout": 10 }]
+    }],
+    "PreToolUse": [{
+      "matcher": "Edit|Write",
+      "hooks": [{ "type": "command", "command": "./hooks/pre-edit", "timeout": 5 }]
+    }],
+    "PostToolUse": [{
+      "matcher": "Edit|Write",
+      "hooks": [{ "type": "command", "command": "./hooks/post-edit", "timeout": 5 }]
+    }],
+    "UserPromptSubmit": [{
+      "hooks": [{ "type": "command", "command": "./hooks/prompt-context", "timeout": 5 }]
+    }]
+  }
+}
