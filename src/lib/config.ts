@@ -12,7 +12,14 @@ export function defaultConfig(): Config {
 export function loadConfig(cwd = process.cwd()): Config {
   const defaults = defaultConfig()
   const path = CONFIG_FILE(cwd)
-  if (!existsSync(path)) return defaults
+  if (!existsSync(path)) {
+    // Lazy init: persist defaults if .pm/ dir already exists
+    const pmDir = join(cwd, '.pm')
+    if (existsSync(pmDir)) {
+      writeFileSync(path, JSON.stringify(defaults, null, 2) + '\n')
+    }
+    return defaults
+  }
 
   try {
     const raw = JSON.parse(readFileSync(path, 'utf-8'))

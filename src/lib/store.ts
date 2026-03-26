@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { nanoid } from 'nanoid'
 import type { DataStore, Feature, Phase, Issue, Task, LogEntry, NextTask, Decision } from './types.js'
 import { PM_VERSION } from './version.js'
+import { loadConfig } from './config.js'
 
 const PM_DIR = join(process.cwd(), '.pm')
 const DATA_FILE = join(PM_DIR, 'data.json')
@@ -12,6 +13,8 @@ function ensureDir() {
   if (!existsSync(PM_DIR)) {
     mkdirSync(PM_DIR, { recursive: true })
   }
+  // Lazy-create config.json with defaults if missing (for plugin users who skip pm init)
+  loadConfig()
 }
 
 export function loadStore(): DataStore {

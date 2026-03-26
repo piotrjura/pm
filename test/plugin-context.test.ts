@@ -41,3 +41,16 @@ describe('session-start in plugin context', () => {
     expect(result.status).toBe(0)
   })
 })
+
+describe('lazy config init', () => {
+  it('creates config.json with defaults on first pm command', () => {
+    pm('add-issue "test"', cwd, { agent: 'claude-code' })
+
+    const configPath = join(cwd, '.pm', 'config.json')
+    expect(existsSync(configPath)).toBe(true)
+
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'))
+    expect(config.decisions).toBe(true)
+    expect(config.agents).toContain('claude-code')
+  })
+})
