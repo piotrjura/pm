@@ -1,17 +1,14 @@
 import { markTaskDone, markIssueDone, loadStore } from '../lib/store.js'
-import { loadSession, SCOPE_WARN_FILES, loadIdentityFlags } from '../lib/hooks.js'
+import { loadSession, SCOPE_WARN_FILES } from '../lib/hooks.js'
 import { parseFlag, hasFlag } from '../lib/args.js'
 
 export function cmdDone(args: string[]) {
   const id = args[0]
   if (!id) {
-    console.error('Usage: pm done <taskId|issueId> [--agent <name>] [--instance <id>] [--model <name>] [--note "what you did"] [--force]')
+    console.error('Usage: pm done <taskId|issueId> [--note "what you did"] [--force]')
     process.exit(1)
   }
 
-  const agent = parseFlag(args, '--agent')
-  const instance = parseFlag(args, '--instance')
-  const model = parseFlag(args, '--model')
   const note = parseFlag(args, '--note')
   const forceReview = hasFlag(args, '--review')
   const force = hasFlag(args, '--force')
@@ -31,7 +28,7 @@ export function cmdDone(args: string[]) {
       }
     }
 
-    const result = markIssueDone(issueId, agent, note, model, instance)
+    const result = markIssueDone(issueId, note)
     if (result && result.status === 'done' && issue.status === 'done') {
       console.log(`Already done: issue ${issueId}`)
     } else {
@@ -49,7 +46,7 @@ export function cmdDone(args: string[]) {
     }
   }
 
-  const nextTask = markTaskDone(id, agent, note, forceReview, model, instance)
+  const nextTask = markTaskDone(id, note, forceReview)
 
   if (forceReview) {
     console.log(`Submitted for review: task ${id}`)
@@ -58,7 +55,6 @@ export function cmdDone(args: string[]) {
   }
 
   console.log(`Done: task ${id}`)
-  if (agent) console.log(`Agent: ${agent}`)
   if (note) console.log(`Note : ${note}`)
   console.log()
 
@@ -117,10 +113,8 @@ export function buildScopeErrorMessage(
   activeId: string,
   type: 'task' | 'issue',
   files: string[],
-  idFlags: string,
 ): string {
   const groups = groupFilesByConcern(files)
-  const idSuffix = idFlags ? ` ${idFlags}` : ''
 
   const lines: string[] = [
     `⚠ SCOPE WARNING: ${files.length} files edited under one ${type} (limit: ${SCOPE_WARN_FILES - 1}).`,
@@ -129,9 +123,9 @@ export function buildScopeErrorMessage(
 
   for (const g of groups) {
     if (g.name === 'tests') {
-      lines.push(`  - "Add tests"${idSuffix}`)
+      lines.push(`  - "Add tests"`)
     } else {
-      lines.push(`  - "Update ${g.name}"${idSuffix}`)
+      lines.push(`  - "Update ${g.name}"`)
     }
   }
 
@@ -145,6 +139,5 @@ function checkScope(cwd: string, activeId: string, type: 'task' | 'issue'): stri
   if (!session || session.activeId !== activeId) return null
   if (session.files.length < SCOPE_WARN_FILES) return null
 
-  const idFlags = loadIdentityFlags(cwd)
-  return buildScopeErrorMessage(activeId, type, session.files, idFlags)
+  return buildScopeErrorMessage(activeId, type, session.files)
 }

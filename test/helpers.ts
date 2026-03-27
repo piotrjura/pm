@@ -37,11 +37,9 @@ function parseArgs(input: string): string[] {
   return args
 }
 
-export function pm(args: string, cwd: string, opts?: { agent?: string }): { stdout: string; exitCode: number } {
+export function pm(args: string, cwd: string): { stdout: string; exitCode: number } {
   const env: Record<string, string> = { ...process.env as Record<string, string>, NO_COLOR: '1' }
-  // Pass agent as --agent flag, not env var
-  const flagArgs = opts?.agent ? ` --agent ${opts.agent}` : ''
-  const result = spawnSync(TSX, [CLI, ...parseArgs(args + flagArgs)], {
+  const result = spawnSync(TSX, [CLI, ...parseArgs(args)], {
     cwd,
     encoding: 'utf-8',
     env,

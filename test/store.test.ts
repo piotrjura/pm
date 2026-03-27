@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { createTestDir, cleanupTestDir, pm, loadData } from './helpers.js'
+import { createTestDir, cleanupTestDir, pm, loadData, createFullFeature } from './helpers.js'
 
 let cwd: string
 
@@ -102,11 +102,10 @@ describe('task lifecycle', { timeout: 30_000 }, () => {
     const t = pm(`add-task ${featureId} ${phaseId} T`, cwd)
     const taskId = t.stdout.match(/^task:(\S+)/m)![1]
 
-    pm(`start ${taskId} --agent test-agent`, cwd)
+    pm(`start ${taskId}`, cwd)
     let data = loadData(cwd)
     expect(data.features[0].phases[0].tasks[0].status).toBe('in-progress')
     expect(data.features[0].status).toBe('in-progress')
-    expect(data.log[0].agent).toBe('test-agent')
 
     pm(`done ${taskId} --note "All good"`, cwd)
     data = loadData(cwd)
@@ -214,5 +213,94 @@ describe('log entries', { timeout: 15_000 }, () => {
     expect(data.log[0].action).toBe('started')
     expect(data.log[1].action).toBe('completed')
     expect(data.log[1].note).toBe('Did it')
+  })
+})
+
+describe('sweep', () => {
+  it('closes open issues', () => {
+    pm('init', cwd)
+    pm('add-issue "Fix bug"', cwd)
+    pm('add-issue "Another fix"', cwd)
+
+    const result = pm('sweep', cwd)
+    expect(result.stdout).toContain('Fix bug')
+    expect(result.stdout).toContain('Another fix')
+    expect(result.stdout).toContain('done')
+
+    const data = loadData(cwd)
+    expect(data.issues.every((i: { status: string }) => i.status === 'done')).toBe(true)
+  })
+
+  it('closes in-progress tasks and marks feature done', () => {
+    pm('init', cwd)
+    const { featureId, phaseId, taskId } = createFullFeature(cwd)
+    pm(`start ${taskId}`, cwd)
+
+    const result = pm('sweep', cwd)
+    expect(result.stdout).toContain('Task-1')
+    expect(result.stdout).toContain('done')
+
+    const data = loadData(cwd)
+    const feature = data.features.find((f: { id: string }) => f.id === featureId)
+    expect(feature.status).toBe('done')
+    expect(feature.phases[0].tasks[0].status).toBe('done')
+  })
+
+  it('closes error tasks with swept note', () => {
+    pm('init', cwd)
+    const { taskId } = createFullFeature(cwd)
+    pm(`start ${taskId}`, cwd)
+    pm(`error ${taskId} --note "build failed"`, cwd)
+
+    const result = pm('sweep', cwd)
+    expect(result.stdout).toContain('Error task')
+
+    const data = loadData(cwd)
+    const task = data.features[0].phases[0].tasks[0]
+    expect(task.status).toBe('done')
+    expect(task.note).toContain('swept: was error')
+  })
+
+  it('deletes empty draft features', () => {
+    pm('init', cwd)
+    pm('add-feature "Empty draft"', cwd)
+
+    const result = pm('sweep', cwd)
+    expect(result.stdout).toContain('Empty draft')
+    expect(result.stdout).toContain('deleted')
+
+    const data = loadData(cwd)
+    expect(data.features.filter((f: { title: string }) => f.title === 'Empty draft')).toHaveLength(0)
+  })
+
+  it('fixes stale feature status when all tasks are done', () => {
+    pm('init', cwd)
+    const { featureId, phaseId, taskId } = createFullFeature(cwd)
+    pm(`done ${taskId}`, cwd)
+
+    // Feature should already be done from markTaskDone, but add a pending task to make it stale
+    const t2 = pm(`add-task ${featureId} ${phaseId} Task-2`, cwd)
+    const taskId2 = t2.stdout.match(/^task:(\S+)/m)![1]
+    pm(`done ${taskId2}`, cwd)
+
+    // Now it should be already done, so sweep reports clean
+    const result = pm('sweep', cwd)
+    expect(result.stdout).toContain('All clean')
+  })
+
+  it('reports all clean when nothing is outstanding', () => {
+    pm('init', cwd)
+    const result = pm('sweep', cwd)
+    expect(result.stdout).toContain('All clean')
+  })
+
+  it('is idempotent — second sweep is clean', () => {
+    pm('init', cwd)
+    pm('add-issue "Fix something"', cwd)
+    createFullFeature(cwd)
+
+    pm('sweep', cwd)
+    const result = pm('sweep', cwd)
+    expect(result.stdout).toContain('All clean')
   })
 })

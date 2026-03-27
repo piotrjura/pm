@@ -69,14 +69,14 @@ describe('pm bridge — basic import', () => {
     expect(data.features[0].planSource).toBe(planPath)
   })
 
-  it('attaches agent and model to tasks when flags provided', () => {
+  it('creates tasks without agent/model fields', () => {
     const planPath = writePlan(cwd, SIMPLE_PLAN)
-    pm(`bridge ${planPath} --agent claude-code --model my-model`, cwd)
+    pm(`bridge ${planPath}`, cwd)
 
     const data = loadData(cwd)
     const task = data.features[0].phases[0].tasks[0]
-    expect(task.agent).toBe('claude-code')
-    expect(task.model).toBe('my-model')
+    expect(task.agent).toBeUndefined()
+    expect(task.model).toBeUndefined()
   })
 })
 
@@ -123,10 +123,9 @@ describe('pm bridge — error handling', () => {
 describe('pm bridge — output includes start command', () => {
   it('shows pm start command for first task', () => {
     const planPath = writePlan(cwd, SIMPLE_PLAN)
-    const { stdout } = pm(`bridge ${planPath} --agent claude-code --model my-model`, cwd)
+    const { stdout } = pm(`bridge ${planPath}`, cwd)
 
     expect(stdout).toContain('pm start')
-    expect(stdout).toContain('--agent claude-code')
   })
 })
 

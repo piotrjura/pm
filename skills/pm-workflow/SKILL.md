@@ -129,17 +129,15 @@ Decisions are **always active**. There is no toggle. If a decision is wrong, rem
 ## Task Lifecycle
 
 ```bash
-pm start <id> --agent claude-code --model <model>
+pm start <id>
 # ... do the work ...
-pm done <id> --note "what changed" --agent claude-code --model <model>
+pm done <id> --note "what changed"
 ```
 
 Other lifecycle commands:
 - `pm error <id> --note "what failed"` — mark failed
 - `pm retry <id>` — re-queue failed task
 - `pm review <id>` — submit for human review
-
-**Always pass `--agent` and `--model` flags** on every pm command.
 
 ## Status Commands
 
@@ -158,8 +156,26 @@ pm bridge <plan-file.md>             # Import plan
 pm bridge <plan-file.md> --spec      # Also extract decisions
 ```
 
+## Finishing Clean
+
+**After your last task or issue is done, you MUST run `pm sweep` before ending the conversation.**
+
+`pm sweep` auto-closes everything outstanding:
+- Non-done issues → done
+- In-progress/pending/error tasks → done
+- Features with all tasks done but stale status → done
+- Empty draft features → deleted
+
+```bash
+pm sweep
+```
+
+If it prints "All clean" — you're done. If it prints items it swept, verify the output makes sense (e.g. error tasks being closed should have been genuinely abandoned, not needing a retry).
+
+**This is not optional.** Every conversation must leave pm in a clean state.
+
 ## Settings
 
 ```bash
-pm settings                          # TUI: cycle planning/questions, toggle agents
+pm settings                          # TUI: cycle planning/questions
 ```

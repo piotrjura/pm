@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { Box, Text, useInput } from 'ink'
 import Spinner from 'ink-spinner'
 import type { Feature, Task } from '../lib/types.js'
-import { relativeDate, shortModel } from '../lib/format.js'
+import { relativeDate } from '../lib/format.js'
 
 const TASK_COLOR: Record<Task['status'], string | undefined> = {
   pending: 'gray',
@@ -146,13 +146,10 @@ export function FeatureDetail({ feature, height, width, focused, onBack }: Featu
                       </Box>
                     )}
 
-                    {/* ID + agent/model row — shown when cursor is on this task */}
+                    {/* ID row — shown when cursor is on this task */}
                     {isCursor && (
-                      <Box paddingLeft={3} gap={2}>
+                      <Box paddingLeft={3}>
                         <Text dimColor>id: {task.id}</Text>
-                        {(task.agent || task.model) && (
-                          <Text dimColor>{[task.agent, task.model && shortModel(task.model)].filter(Boolean).join('/')}</Text>
-                        )}
                       </Box>
                     )}
                   </Box>

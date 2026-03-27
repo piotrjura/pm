@@ -1,7 +1,7 @@
 import React from 'react'
 import { Box, Text, useInput } from 'ink'
 import type { Issue } from '../lib/types.js'
-import { relativeDate, PRIORITY_COLOR, shortModel } from '../lib/format.js'
+import { relativeDate, PRIORITY_COLOR } from '../lib/format.js'
 
 interface IssueDetailProps {
   issue: Issue
@@ -40,12 +40,6 @@ export function IssueDetail({ issue, height, onBack }: IssueDetailProps) {
           <Text color={PRIORITY_COLOR[issue.priority]}>{issue.priority}</Text>
         </Text>
         <Text dimColor>created {relativeDate(issue.createdAt)}</Text>
-        {(issue.agent || issue.model) && (
-          <Text>
-            <Text dimColor>agent </Text>
-            <Text>{[issue.agent, issue.model && shortModel(issue.model)].filter(Boolean).join('/')}</Text>
-          </Text>
-        )}
       </Box>
 
       {/* Description */}

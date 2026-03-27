@@ -6,151 +6,92 @@ https://github.com/user-attachments/assets/9c5899b6-7801-47f1-a975-eda3c97e3f10
 
 A project manager for AI coding agents. Not for you — for Claude.
 
-pm gives your AI agent structure so it doesn't just dive into code and lose track of what it's doing. It enforces planning before editing, tracks scope so changes don't sprawl across dozens of files, and logs decisions so the next session doesn't redo work the last one already figured out.
+pm gives your AI agent persistent memory across sessions. It knows what was decided, what was done, and what's next — so every conversation picks up where the last one left off instead of starting from zero.
 
-You install it, run `pm` in your project, and the setup wizard handles the rest. From that point on, your AI agent manages itself — creating tasks, logging progress, recording why it chose approach A over approach B. You just tell it what to build.
-
-pm supports multiple Claude Code sessions working on the same project concurrently. Each session is identified automatically by hooks, and pm tracks which model is working on each task and issue.
+The agent manages itself: planning work, tracking scope, recording decisions, and cleaning up when it's done. You just tell it what to build.
 
 ## Install
 
 ### As a Claude Code plugin (recommended)
 
-In Claude Code, register the marketplace first:
+Register the marketplace and install:
 
 ```
 /plugin marketplace add piotrjura/pm
-```
-
-Then install the plugin:
-
-```
 /plugin install pm@pm-marketplace
 ```
 
-That's it. The plugin is self-contained — hooks, skill, and CLI are all bundled. No global install needed. Start a new conversation and pm is active.
+That's it. The plugin is self-contained — hooks, workflow skill, and CLI are all bundled. Start a new conversation and pm is active.
 
 ### As a global CLI
 
-If you want the full TUI experience and terminal commands:
+For the full TUI and terminal commands:
 
 ```bash
 npm install -g @piotrjura/pm
 ```
 
-Then navigate to your project and run:
+Then in your project:
 
 ```bash
 pm
 ```
 
-The setup wizard walks through three steps:
+pm auto-configures Claude Code hooks and initializes the data store. Both install paths work together — if you have the plugin and later add the global CLI, pm detects it and uses the richer terminal output.
 
-1. **Whitelist pm commands** — adds `pm *` to Claude Code's allowed commands
-2. **Set up hooks** — installs Claude Code hooks that enforce the workflow
-3. **Create data store** — initializes `.pm/data.json` in your project
+## What it does
 
-Both install paths work together — if you install the plugin and later add the global CLI, pm detects it and uses the global `pm` command for richer output.
+pm enforces one rule: **log work before writing code.** Everything else flows from that.
 
-### The problem
+When Claude starts a session, pm briefs it on what's in progress. When it tries to edit a file without tracking work, pm blocks the edit. When scope creeps beyond 3 files, pm warns. When a decision gets made, pm records why — so the next session doesn't re-decide it.
 
-AI agents are productive but forgetful. Each session starts from zero. Without structure, they'll re-investigate decisions already made, let a "small fix" balloon into a 15-file refactor, or lose track of what was done halfway through a feature. pm solves this by giving the agent a persistent, enforced workflow — the same way a project manager keeps a team on track, except the team is an LLM.
+### Planning that scales to the task
 
-### What carries over between sessions
-
-Every session starts with a briefing. pm tells Claude what's in progress, what was done recently, and what decisions were made. Nothing gets lost.
-
-- **`pm recap`** — the agent runs this automatically on session start. It sees active tasks, recent progress, and open issues.
-- **`pm log`** — full history of everything done: which tasks were started, completed, failed, and what notes the agent left.
-- **`pm why "search term"`** — searches all recorded decisions. Before the agent re-decides something, it checks if a previous session already settled it.
-- **`pm show <id>`** — deep view of a feature with all phases, tasks, decisions, and timestamps.
-
-This is the core value. A five-session feature doesn't lose context between sessions — the agent picks up where it left off.
-
-## How it works
-
-pm enforces a simple rule: **log work before writing code.**
-
-You don't need to run these commands yourself — Claude does. When it starts a session, pm briefs it on what's in progress. When it tries to edit a file without an active task, pm blocks it. When scope creeps beyond 3 files, pm warns about it. The agent learns the workflow on its first session and follows it from there.
-
-There are two ways to track work:
-
-**Features** — for structured work (multiple files, multiple steps):
+pm adapts to the size of the work. A quick bug fix gets logged and done in seconds. A multi-file feature gets structured into phases and tasks with mandatory context checks. Configure how much ceremony you want:
 
 ```bash
-pm add-feature "Add user preferences" --description "Store and apply user prefs"
-# Use --type fix for bug/regression tracking
-pm add-feature "Fix login bug" --fix --description "Session token expiry issue"
-pm add-phase <featureId> "Implementation"
-pm add-task <featureId> <phaseId> "Add preferences table" --files "schema.ts,migrations"
-pm start <taskId>
-# agent does the work
-pm done <taskId> --note "Added prefs table with defaults"
+pm settings  # cycle planning depth (none/medium/all) and question level (none/medium/thorough)
 ```
 
-**Issues** — for quick one-off fixes (1-2 files, one logical change):
+### Decisions that persist
+
+When the agent makes a design choice, it records it with reasoning:
 
 ```bash
-pm add-issue "Fix pagination off-by-one" --type bug --priority high
-# Issue status flows: triage → backlog → todo → in-progress → done
-# agent does the work
-pm done <id> --note "Fixed fence post error in offset calc"
+pm decide <id> "Use JSON storage instead of SQLite" \
+  --reasoning "Single file, no native deps, portable"
 ```
 
-Each task is a focused unit — one logical change across 1-3 files. If the agent touches more, pm warns it to break the work down further.
-
-## Decision logging
-
-When the agent makes a design choice, it records it:
-
-```bash
-pm decide <id> "Use JSON file storage instead of SQLite" \
-  --reasoning "Single file, no native deps, portable across machines"
-```
-
-Decisions attach to features, tasks, or issues and persist across sessions. Search them later:
+Before making new choices, the agent checks what was already decided:
 
 ```bash
 pm why "storage"
-# Returns all decisions matching "storage" with context
 ```
 
-This is what makes pm useful across sessions. Claude doesn't re-discover or re-decide things that were already settled — it checks first.
+This is the core value. A five-session feature doesn't lose context — decisions, trade-offs, and rationale carry forward.
+
+### Clean finishes
+
+After work is done, `pm sweep` auto-closes everything outstanding — open issues, stale tasks, orphaned drafts. Every conversation leaves the project in a clean state.
 
 ## Claude Code hooks
 
-This is the enforcement layer. pm installs four hooks that run automatically — no action needed from you:
+pm installs four hooks that run automatically:
 
-| Hook                 | Trigger              | What it does                                                                |
-| -------------------- | -------------------- | --------------------------------------------------------------------------- |
-| **PreToolUse**       | Before any file edit | Blocks edits without an active task or issue                                |
-| **PostToolUse**      | After any file edit  | Tracks which files were edited, warns if scope exceeds 3 files              |
-| **UserPromptSubmit** | Every prompt         | Injects active task context so Claude knows what it's working on            |
-| **SessionStart**     | New session          | Captures agent/model identity, resets stuck tasks, briefs Claude on current state |
+| Hook | What it does |
+|------|-------------|
+| **PreToolUse** | Blocks file edits without an active task or issue |
+| **PostToolUse** | Tracks files edited, warns when scope exceeds 3 files |
+| **UserPromptSubmit** | Injects active task context and relevant decisions into every prompt |
+| **SessionStart** | Resets stuck tasks, briefs Claude on current state, loads workflow skill |
 
-The hooks are non-destructive — they merge with any existing Claude Code hooks in your project.
-
-## Concurrent sessions
-
-pm supports multiple Claude Code sessions working on the same project concurrently. Identity is tracked automatically.
-
-**Instance** — distinguishes concurrent sessions. Set automatically via `--instance $PPID` in hooks, so two Claude Code windows don't collide.
-
-**Model** — which LLM model is running (e.g., `claude-opus-4-6`, `claude-sonnet-4-6`). Captured automatically from the SessionStart hook input and persisted to `.pm/identity.json`. The prompt-context hook reminds the agent to pass `--agent` and `--model` flags on every pm command, so all tasks, issues, and log entries are tagged.
-
-Both are recorded on tasks, issues, and log entries. The TUI displays model info alongside each item.
+The hooks merge with any existing Claude Code hooks in your project.
 
 ## TUI
 
-Run `pm` with no arguments to open the terminal UI. This is the human interface — while the agent uses CLI commands, you use the TUI to see what's going on.
+Run `pm` with no arguments to open the terminal UI — the human interface for seeing what your agent has been up to.
 
-**Navigation:** arrow keys to move, Enter to open, Esc to go back, q to quit.
-
-**List view** shows all features and issues sorted by date, with progress bars, type badges, priority levels, and decision counts. Use `/` to search, `[`/`]` to paginate, `d` to delete.
-
-**Detail view** shows phases, tasks, decisions, and status for a feature or issue. Feature descriptions with numbered items are split into separate lines for readability.
-
-**Decisions view** — press `w` from the list view to browse all project decisions. Shows decisions sorted newest-first with reasoning and source context. Use `/` to search and arrow keys to navigate.
+**Navigation:** arrows to move, Enter to open, Esc to back, q to quit, `/` to search, `w` for decisions view.
 
 ## CLI reference
 
@@ -158,62 +99,80 @@ Run `pm` with no arguments to open the terminal UI. This is the human interface 
 
 ```
 pm              Open TUI
-pm next         Show the next pending task (priority-aware)
-pm list         List all features and issues with progress
-pm log [N]      Show last N log entries (default: 20)
-pm recap        Session briefing: active work, next steps, recent decisions
+pm next         Next pending task (priority-aware)
+pm list         All features and issues with progress
+pm log [N]      Last N log entries (default: 20)
+pm recap        Session briefing: active work, decisions, next steps
+pm show <id>    Detail view with phases, tasks, decisions
 ```
 
 ### Track work
 
 ```
-pm add-feature <title> [--description "..."] [--fix]
+pm add-feature <title> [--description "..."]
 pm add-phase <featureId> <title>
-pm add-task <featureId> <phaseId> <title> [--description "..."] [--files "a,b"] [--priority 1-5]
-pm add-issue <title> [--type bug|change] [--priority urgent|high|medium|low] [--description "..."]
+pm add-task <featureId> <phaseId> <title> [--files "a,b"] [--priority 1-5]
+pm add-issue <title> [--type bug|change] [--priority urgent|high|medium|low]
 ```
 
-### Task lifecycle
+### Lifecycle
 
 ```
-pm start <id>              Mark task as in-progress
-pm done <id>               Mark as done [--note "..."] [--review]
-pm error <id>              Mark as failed [--note "reason"]
-pm retry <id>              Retry a failed task [--note "context"]
-pm review <id>             Request review [--approve|--reject] [--note "..."]
+pm start <id>       Start task or issue
+pm done <id>        Complete [--note "..."]
+pm error <id>       Mark failed [--note "reason"]
+pm retry <id>       Re-queue failed task
+pm sweep            Close all outstanding items
 ```
-
-Agent, instance, and model are auto-detected (see [Concurrent sessions](#concurrent-sessions)). All commands also accept `--agent`, `--model` as manual overrides.
-
-Tasks can require review by adding `--review` when marking done. Failed tasks support retry with attempt tracking (default max 3 attempts).
 
 ### Decisions
 
 ```
-pm decide <id> "what" [--reasoning "why"]
-pm why "search term"
+pm decide <id> "what" [--reasoning "why"] [--action "do this"]
+pm why "search"     Search all decisions
+pm forget "text"    Remove a decision
 ```
 
 ### Management
 
 ```
-pm show <featureId>        Feature detail with all IDs
-pm update <id>             Update properties [--title "..."] [--description "..."] [--priority ...]
-pm cleanup                 Reset stuck tasks [--errors] [--drafts] [--all] [--quiet]
-pm init                    Initialize pm in current directory
-pm hook <type>             Run a specific hook (used internally by Claude Code)
+pm update <id>      Update properties [--title/--priority/--description]
+pm cleanup          Reset stuck tasks [--errors] [--drafts] [--all]
+pm settings         Configure planning and questions depth
+pm bridge <file>    Import external plan [--spec to extract decisions]
+pm init [--force]   Initialize or re-initialize hooks
 ```
 
 ## Data storage
 
-All data lives in `.pm/data.json` — a single JSON file in your project root. No database, no server, no network calls.
+All data lives in `.pm/data.json` — a single JSON file in your project. No database, no server, no network calls. Add `.pm/` to `.gitignore`.
 
-The file contains features (with phases and tasks), standalone issues, and an append-only log of all actions. Add `.pm/` to your `.gitignore` — task state is local to each developer.
+## Changelog
 
-Other files in `.pm/`:
+### 0.3.0
 
-- `session.json` — edit tracking (files touched, scope warnings), resets between tasks
-- `identity.json` — agent/model identity persisted at session start, used by prompt-context to remind the agent which flags to pass
+- **Claude Code focus** — removed multi-agent and OpenCode support. pm is built for Claude Code, with hooks and a workflow skill that enforce planning and decisions automatically.
+- **Simplified init** — no more wizard. `pm` auto-configures hooks and opens the TUI. One command, no prompts.
+- **`pm sweep`** — new command that auto-closes all outstanding work at the end of a conversation. Issues, tasks, stale features, empty drafts — all cleaned up.
+- **Prescriptive workflow skill** — the bundled skill doesn't just suggest a workflow, it enforces it. Planning depth and question level are configurable per project.
+- **Smaller bundle** — removed 1,400 lines of agent/model/identity tracking code. Leaner, simpler, faster.
+
+### 0.2.1
+
+- Plugin install instructions fix, marketplace sync
+
+### 0.2.0
+
+- Claude Code plugin packaging with marketplace distribution
+- Prescriptive pm-workflow skill with configurable planning/questions
+- Dual distribution: npm global + marketplace plugin
+
+### 0.1.0
+
+- Initial release: features, issues, phases, tasks, decisions
+- Claude Code hooks (pre-edit, post-edit, prompt-context, session-start)
+- Scope tracking, error recovery, plan bridge
+- TUI with list, detail, and decisions views
 
 ## Requirements
 

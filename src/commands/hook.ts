@@ -2,38 +2,30 @@ import { readFileSync, existsSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { hasActiveWork, getStatusSummary, recordEdit, saveIdentity, inferTitle, loadIdentityFlags, getPmCmd } from '../lib/hooks.js'
-import { parseFlag } from '../lib/args.js'
+import { hasActiveWork, getStatusSummary, recordEdit, inferTitle, getPmCmd } from '../lib/hooks.js'
 
 /**
  * Handle Claude Code hook callbacks.
  * Called by hooks configured in .claude/settings.json.
  * Reads JSON from stdin, outputs to stdout (context) or stderr (block reason).
- *
- * Identity is passed as --agent/--instance flags (not env var prefixes)
- * so the command starts with `pm` and stays whitelisted.
  */
 export function cmdHook(args: string[]) {
   const subcommand = args[0]
   // Use CLAUDE_PROJECT_DIR if available, fall back to cwd
   const cwd = process.env.CLAUDE_PROJECT_DIR ?? process.cwd()
 
-  // Identity comes from flags only — no env var fallbacks
-  const agent = parseFlag(args, '--agent')
-  const instance = parseFlag(args, '--instance')
-
   switch (subcommand) {
     case 'pre-edit':
-      handlePreEdit(cwd, agent, instance)
+      handlePreEdit(cwd)
       break
     case 'post-edit':
       handlePostEdit(cwd)
       break
     case 'prompt-context':
-      handlePromptContext(cwd, agent, instance)
+      handlePromptContext(cwd)
       break
     case 'session-start':
-      handleSessionStart(cwd, agent, instance)
+      handleSessionStart(cwd)
       break
     default:
       console.error(`Unknown hook: ${subcommand}`)
@@ -51,7 +43,7 @@ function readStdin(): string {
 }
 
 /** PreToolUse hook — block Edit/Write if no active work is logged. */
-function handlePreEdit(cwd: string, agent?: string, instance?: string) {
+function handlePreEdit(cwd: string) {
   const input = readStdin()
 
   try {
@@ -71,12 +63,12 @@ function handlePreEdit(cwd: string, agent?: string, instance?: string) {
     // Can't parse stdin, check active work anyway
   }
 
-  const { active } = hasActiveWork(cwd, agent, instance)
+  const { active } = hasActiveWork(cwd)
   if (active) {
     process.exit(0) // allow
   }
 
-  // Block — no active work. Build an actionable message with inferred title + identity flags.
+  // Block — no active work. Build an actionable message with inferred title.
   let title: string | undefined
   try {
     const data = JSON.parse(input)
@@ -86,15 +78,13 @@ function handlePreEdit(cwd: string, agent?: string, instance?: string) {
     // Can't parse stdin — no title inference
   }
 
-  const idFlags = loadIdentityFlags(cwd)
-  const idSuffix = idFlags ? ` ${idFlags}` : ''
   const titleArg = title ? `"${title}"` : '"describe your change"'
   const pmCmd = getPmCmd()
 
   process.stderr.write(
     `BLOCKED: No active work in pm.\n\n` +
     `Run this to start tracking:\n` +
-    `  ${pmCmd} add-issue ${titleArg}${idSuffix}\n\n` +
+    `  ${pmCmd} add-issue ${titleArg}\n\n` +
     `Or for larger work:\n` +
     `  ${pmCmd} add-feature "Feature title" --description "..."\n\n` +
     `Then retry your edit.`
@@ -126,7 +116,7 @@ function handlePostEdit(cwd: string) {
 }
 
 /** UserPromptSubmit hook — inject scope-aware task context into every prompt. */
-function handlePromptContext(cwd: string, agent?: string, instance?: string) {
+function handlePromptContext(cwd: string) {
   // Read user's prompt text from stdin (Claude Code sends {"prompt": "..."})
   const input = readStdin()
   let prompt: string | undefined
@@ -137,33 +127,18 @@ function handlePromptContext(cwd: string, agent?: string, instance?: string) {
     // No valid JSON — proceed without prompt matching
   }
 
-  const summary = getStatusSummary(cwd, agent, instance, prompt)
+  const summary = getStatusSummary(cwd, prompt)
   if (summary) {
     process.stdout.write(summary)
   }
   process.exit(0)
 }
 
-/** SessionStart hook — persist identity, capture model, reset stuck tasks, brief on prior work. */
-function handleSessionStart(cwd: string, agent?: string, instance?: string) {
-  // Parse model from hook input (Claude Code sends {"model": "claude-opus-4-6"} on stdin)
-  const input = readStdin()
-  let model: string | undefined
-  try {
-    const data = JSON.parse(input)
-    model = data?.model
-  } catch {
-    // No valid JSON — skip
-  }
-
-  // Persist agent/model so prompt-context can tell the agent what flags to pass
-  if (agent || model || instance) {
-    saveIdentity(cwd, { agent, model, instance })
-  }
-
+/** SessionStart hook — reset stuck tasks, brief on prior work. */
+function handleSessionStart(cwd: string) {
   const contextParts: string[] = []
 
-  // 1. Inject pm-workflow skill content (like superpowers injects using-superpowers)
+  // 1. Inject pm-workflow skill content
   const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT
     || join(dirname(fileURLToPath(import.meta.url)), '..')
   const skillPath = join(pluginRoot, 'skills', 'pm-workflow', 'SKILL.md')
@@ -186,9 +161,8 @@ function handleSessionStart(cwd: string, agent?: string, instance?: string) {
   }
 
   // 3. When running as plugin, tell the agent the exact pm command to use
-  //    so skill references to bare `pm` get resolved correctly.
   if (process.env.CLAUDE_PLUGIN_ROOT) {
-    contextParts.push(`**pm command:** Run all pm commands as: \`${pmBin}\`\nExample: \`${pmBin} add-issue "description" --agent claude-code\``)
+    contextParts.push(`**pm command:** Run all pm commands as: \`${pmBin}\`\nExample: \`${pmBin} add-issue "description"\``)
     try {
       execSync('command -v pm', { encoding: 'utf-8', timeout: 2000 })
     } catch {
@@ -196,7 +170,7 @@ function handleSessionStart(cwd: string, agent?: string, instance?: string) {
     }
   }
 
-  // Output as additionalContext JSON (same format as superpowers)
+  // Output as additionalContext JSON
   if (contextParts.length > 0) {
     const context = contextParts.join('\n\n')
     const output = {

@@ -180,7 +180,7 @@ export function parseSpecDecisions(content: string): ParsedDecision[] {
 export function cmdBridge(args: string[]) {
   const planPath = args[0]
   if (!planPath) {
-    console.error('Usage: pm bridge <plan-file> [--spec <spec-file>] [--agent <name>] [--model <name>]')
+    console.error('Usage: pm bridge <plan-file> [--spec <spec-file>]')
     process.exit(1)
   }
 
@@ -188,9 +188,6 @@ export function cmdBridge(args: string[]) {
     console.error(`Plan file not found: ${planPath}`)
     process.exit(1)
   }
-
-  const agent = parseFlag(args, '--agent')
-  const model = parseFlag(args, '--model')
 
   const content = readFileSync(planPath, 'utf-8')
   const parsed = parsePlan(content, planPath)
@@ -227,8 +224,6 @@ export function cmdBridge(args: string[]) {
         title: task.title,
         description: task.description,
         files: task.files,
-        agent,
-        model,
       })
       if (!createdTask) continue
       if (!firstTaskId) firstTaskId = createdTask.id
@@ -238,8 +233,7 @@ export function cmdBridge(args: string[]) {
 
   lines.push('')
   lines.push('Start work:')
-  const idSuffix = [agent && `--agent ${agent}`, model && `--model ${model}`].filter(Boolean).join(' ')
-  lines.push(`  pm start ${firstTaskId ?? '?'}${idSuffix ? ' ' + idSuffix : ''}`)
+  lines.push(`  pm start ${firstTaskId ?? '?'}`)
 
   // Handle --spec flag: extract decisions from spec file
   const hasSpec = args.includes('--spec')

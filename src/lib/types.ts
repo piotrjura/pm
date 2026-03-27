@@ -23,12 +23,6 @@ export interface Task {
   requiresReview?: boolean
   /** Implementation note left by the agent when marking done */
   note?: string
-  /** Which agent is working on / last worked on this task */
-  agent?: string
-  /** Instance ID (PPID) to distinguish multiple sessions of the same agent */
-  instance?: string
-  /** Which model was used (e.g. claude-opus-4-6, claude-sonnet-4-6) */
-  model?: string
   /** Key decisions made during this task */
   decisions?: Decision[]
   doneAt?: string
@@ -66,12 +60,6 @@ export interface Issue {
   description?: string
   status: 'triage' | 'backlog' | 'todo' | 'in-progress' | 'done'
   priority: 'urgent' | 'high' | 'medium' | 'low'
-  /** Which agent is working on / last worked on this issue */
-  agent?: string
-  /** Instance ID (PPID) to distinguish multiple sessions of the same agent */
-  instance?: string
-  /** Which model was used */
-  model?: string
   /** Key decisions made while resolving this issue */
   decisions?: Decision[]
   createdAt: string
@@ -88,8 +76,6 @@ export interface LogEntry {
   issueTitle?: string
   action: 'started' | 'completed' | 'error' | 'rejected' | 'reset'
   at: string
-  agent?: string
-  model?: string
   note?: string
   files?: string[]
 }
@@ -107,7 +93,6 @@ export type QuestionsLevel = 'none' | 'medium' | 'thorough'
 export interface Config {
   planning: PlanningLevel
   questions: QuestionsLevel
-  agents: string[]
 }
 
 // The resolved "next task" returned by getNextTask()

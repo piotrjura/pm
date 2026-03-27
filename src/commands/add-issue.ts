@@ -8,7 +8,7 @@ const VALID_TYPES = ['bug', 'change'] as const
 export function cmdAddIssue(args: string[]) {
   const title = args[0]
   if (!title) {
-    console.error('Usage: pm add-issue <title> [--type bug|change] [--priority urgent|high|medium|low] [--description "..."] [--agent <name>] [--instance <id>] [--model <name>]')
+    console.error('Usage: pm add-issue <title> [--type bug|change] [--priority urgent|high|medium|low] [--description "..."]')
     process.exit(1)
   }
 
@@ -27,11 +27,8 @@ export function cmdAddIssue(args: string[]) {
   const type = typeRaw as Issue['type']
 
   const description = parseFlag(args, '--description')
-  const agent = parseFlag(args, '--agent')
-  const instance = parseFlag(args, '--instance')
-  const model = parseFlag(args, '--model')
 
-  const issue = addIssue(title, priority, description, type, agent, instance, model)
+  const issue = addIssue(title, priority, description, type)
   console.log(`issue:${issue.id}`)
   console.log(`Created [${issue.type}]: ${issue.title}`)
   console.log(`Priority: ${issue.priority}`)

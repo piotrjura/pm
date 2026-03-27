@@ -14,9 +14,7 @@ export function cmdLog(args: string[]) {
   for (const entry of entries) {
     const time = new Date(entry.at).toLocaleString()
     const icon = entry.action === 'completed' ? '✓' : entry.action === 'started' ? '▶' : entry.action === 'reset' ? '↺' : '✗'
-    const meta = [entry.agent, entry.model].filter(Boolean).join('/')
-    const metaLabel = meta ? ` [${meta}]` : ''
-    console.log(`${icon} ${time}${metaLabel}`)
+    console.log(`${icon} ${time}`)
     if (entry.issueTitle) {
       console.log(`  Issue: ${entry.issueTitle}`)
     } else {

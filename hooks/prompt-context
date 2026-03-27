@@ -1,2 +1,2 @@
 #!/bin/bash
-node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" hook prompt-context --agent claude-code --instance $PPID "$@"
+node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" hook prompt-context "$@"

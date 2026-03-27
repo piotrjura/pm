@@ -13,7 +13,7 @@ afterEach(() => { cleanupTestDir(cwd) })
 
 describe('session-start in plugin context', () => {
   it('succeeds with CLAUDE_PLUGIN_ROOT set', () => {
-    pm('add-issue "test issue"', cwd, { agent: 'claude-code' })
+    pm('add-issue "test issue"', cwd)
 
     const projectRoot = join(import.meta.dirname, '..')
     const result = spawnSync(TSX, [CLI, 'hook', 'session-start', '--agent', 'claude-code', '--instance', '12345'], {
@@ -28,7 +28,7 @@ describe('session-start in plugin context', () => {
   })
 
   it('still works without CLAUDE_PLUGIN_ROOT', () => {
-    pm('add-issue "test issue"', cwd, { agent: 'claude-code' })
+    pm('add-issue "test issue"', cwd)
 
     const result = spawnSync(TSX, [CLI, 'hook', 'session-start', '--agent', 'claude-code', '--instance', '12345'], {
       cwd,
@@ -44,7 +44,7 @@ describe('session-start in plugin context', () => {
 
 describe('lazy config init', () => {
   it('creates config.json with defaults on first pm command', () => {
-    pm('add-issue "test"', cwd, { agent: 'claude-code' })
+    pm('add-issue "test"', cwd)
 
     const configPath = join(cwd, '.pm', 'config.json')
     expect(existsSync(configPath)).toBe(true)
@@ -52,18 +52,17 @@ describe('lazy config init', () => {
     const config = JSON.parse(readFileSync(configPath, 'utf-8'))
     expect(config.planning).toBe('medium')
     expect(config.questions).toBe('medium')
-    expect(config.agents).toContain('claude-code')
   })
 })
 
 describe('slim prompt-context in plugin mode', () => {
   it('mentions pm-workflow skill when CLAUDE_PLUGIN_ROOT is set and no active work', () => {
     // Initialize pm data so prompt-context has a store to read
-    pm('add-issue "setup"', cwd, { agent: 'claude-code' })
+    pm('add-issue "setup"', cwd)
     // Mark it done so there's no active work
     const data = JSON.parse(readFileSync(join(cwd, '.pm', 'data.json'), 'utf-8'))
     const issueId = data.issues[0]?.id
-    if (issueId) pm(`done ${issueId} --note "done"`, cwd, { agent: 'claude-code' })
+    if (issueId) pm(`done ${issueId} --note "done"`, cwd)
 
     const projectRoot = join(import.meta.dirname, '..')
     const result = spawnSync(TSX, [CLI, 'hook', 'prompt-context', '--agent', 'claude-code'], {
@@ -80,10 +79,10 @@ describe('slim prompt-context in plugin mode', () => {
   })
 
   it('shows full instructions without CLAUDE_PLUGIN_ROOT when no active work', () => {
-    pm('add-issue "setup"', cwd, { agent: 'claude-code' })
+    pm('add-issue "setup"', cwd)
     const data = JSON.parse(readFileSync(join(cwd, '.pm', 'data.json'), 'utf-8'))
     const issueId = data.issues[0]?.id
-    if (issueId) pm(`done ${issueId} --note "done"`, cwd, { agent: 'claude-code' })
+    if (issueId) pm(`done ${issueId} --note "done"`, cwd)
 
     const result = spawnSync(TSX, [CLI, 'hook', 'prompt-context', '--agent', 'claude-code'], {
       cwd,

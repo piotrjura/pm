@@ -55,8 +55,6 @@ function showFeature(feature: ReturnType<typeof loadStore>['features'][0]) {
       const icon = STATUS_ICON[task.status] ?? '?'
       const meta: string[] = []
       if (task.priority !== undefined && task.priority !== 3) meta.push(`P${task.priority}`)
-      if (task.agent) meta.push(task.agent)
-      if (task.model) meta.push(task.model)
       if ((task.attempt ?? 0) > 0) meta.push(`attempt ${task.attempt}`)
       if (task.doneAt) meta.push(`done ${task.doneAt.slice(0, 10)}`)
       const metaStr = meta.length > 0 ? `  ${meta.join(' ')}` : ''
@@ -80,10 +78,6 @@ function showIssue(issue: ReturnType<typeof loadStore>['issues'][0]) {
   console.log(`[${typeLabel}] ${issue.title}  [issue:${issue.id}]`)
   console.log(`  Status: ${issue.status}  Priority: ${issue.priority}`)
   if (issue.description) console.log(`  ${issue.description}`)
-  if (issue.agent || issue.model) {
-    const parts = [issue.agent, issue.model].filter(Boolean)
-    console.log(`  Agent: ${parts.join(' / ')}`)
-  }
   console.log(`  Created: ${issue.createdAt.slice(0, 10)}`)
 
   if (issue.decisions?.length) {

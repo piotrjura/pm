@@ -7,18 +7,15 @@ import { FeatureDetail } from './components/feature-detail.js'
 import { IssueDetail } from './components/issue-detail.js'
 import { DecisionsList } from './components/decisions-list.js'
 import { SettingsScreen } from './components/settings-screen.js'
-import { InitScreen } from './components/init-screen.js'
 import { UpgradeScreen } from './components/upgrade-screen.js'
 import { useNavigation } from './hooks/use-navigation.js'
 import { useStore } from './hooks/use-store.js'
-import { detectProjectStatus, isInitialized, ensureClaudePermission, detectUpgrade } from './lib/init.js'
+import { isInitialized, ensureClaudePermission, detectUpgrade } from './lib/init.js'
 import type { UpgradeInfo } from './lib/init.js'
 import { loadStore, removeDecision } from './lib/store.js'
 import type { DecisionMatch } from './lib/store.js'
 import { ensureHooks, hasClaudeHooks } from './lib/hooks.js'
-import { ensureOpenCodePlugin, hasOpenCodePlugin } from './lib/opencode.js'
 import { loadConfig, saveConfig } from './lib/config.js'
-import type { AgentUpgrade } from './lib/init.js'
 
 function setTerminalTitle(title: string) {
   process.stdout.write(`\x1b]2;${title}\x07`)
@@ -39,58 +36,41 @@ export function App() {
     return () => { stdout.off('resize', onResize) }
   }, [stdout])
 
-  const [initialized, setInitialized] = useState(() => isInitialized())
-  const [projectStatus] = useState(() => detectProjectStatus())
+  const [initialized] = useState(() => {
+    if (!isInitialized()) {
+      // Auto-init: create data store and set up hooks silently
+      const cwd = process.cwd()
+      loadStore()
+      ensureClaudePermission()
+      ensureHooks(cwd)
+    }
+    return true
+  })
   const [config, setConfig] = useState(() => loadConfig())
   const [upgradeInfo, setUpgradeInfo] = useState<UpgradeInfo | null>(() => {
-    if (!isInitialized()) return null
     const upgrade = detectUpgrade()
     if (!upgrade) return null
-    // Perform the upgrade — update all configured agents
+    // Perform the upgrade
     const cwd = process.cwd()
-    const agents: AgentUpgrade[] = []
 
     if (hasClaudeHooks(cwd)) {
       ensureClaudePermission()
-      const r = ensureHooks(cwd)
-      agents.push({ name: 'Claude Code', result: r === 'exists' ? 'exists' : 'updated' })
-    }
-
-    if (hasOpenCodePlugin(cwd)) {
-      const r = ensureOpenCodePlugin(cwd)
-      agents.push({ name: 'OpenCode', result: r === 'exists' ? 'exists' : 'updated' })
+      ensureHooks(cwd)
     }
 
     // loadStore will stamp the new version
     loadStore()
-    return { ...upgrade, agents }
+    return upgrade
   })
 
   const nav = useNavigation()
   const store = useStore()
 
-  // decisions are always enabled — no config toggle
-
-  const handleInit = useCallback(() => {
-    const cwd = process.cwd()
-    loadStore()
-    ensureClaudePermission()
-    ensureHooks(cwd)
-    setInitialized(true)
-    setConfig(loadConfig())
-    store.refresh()
-  }, [store])
-
   const handleSettingsSave = useCallback((newConfig: typeof config) => {
     const cwd = process.cwd()
     saveConfig(newConfig, cwd)
-    if (newConfig.agents.includes('claude-code')) {
-      ensureClaudePermission()
-      ensureHooks(cwd)
-    }
-    if (newConfig.agents.includes('opencode')) {
-      ensureOpenCodePlugin(cwd)
-    }
+    ensureClaudePermission()
+    ensureHooks(cwd)
     setConfig(newConfig)
   }, [])
 
@@ -149,16 +129,6 @@ export function App() {
     if (input === 'q') { exit(); return }
     if (key.escape) { nav.goBack(); return }
   })
-
-  if (!initialized) {
-    return (
-      <InitScreen
-        status={projectStatus}
-        onConfirm={handleInit}
-        onQuit={() => exit()}
-      />
-    )
-  }
 
   if (upgradeInfo) {
     return (

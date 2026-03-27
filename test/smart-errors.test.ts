@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { createTestDir, cleanupTestDir } from './helpers.js'
-import { inferTitle, loadIdentityFlags } from '../src/lib/hooks.js'
+import { inferTitle } from '../src/lib/hooks.js'
 
 const TSX = join(import.meta.dirname, '..', 'node_modules', '.bin', 'tsx')
 const CLI = join(import.meta.dirname, '..', 'src', 'cli.tsx')
@@ -38,22 +38,10 @@ describe('inferTitle', () => {
   })
 })
 
-describe('loadIdentityFlags', () => {
-  it('returns empty string when no identity file', () => {
-    expect(loadIdentityFlags('/nonexistent/path')).toBe('')
-  })
-})
-
 describe('pre-edit hook block message', () => {
   let cwd: string
   beforeEach(() => { cwd = createTestDir() })
   afterEach(() => { cleanupTestDir(cwd) })
-
-  function writeIdentity(dir: string, agent: string, model: string) {
-    const pmDir = join(dir, '.pm')
-    mkdirSync(pmDir, { recursive: true })
-    writeFileSync(join(pmDir, 'identity.json'), JSON.stringify({ agent, model }))
-  }
 
   function writeEmptyStore(dir: string) {
     const pmDir = join(dir, '.pm')
@@ -61,17 +49,15 @@ describe('pre-edit hook block message', () => {
     writeFileSync(join(pmDir, 'data.json'), JSON.stringify({ features: [], issues: [], log: [] }))
   }
 
-  it('includes inferred title and identity flags in block message', () => {
+  it('includes inferred title in block message', () => {
     writeEmptyStore(cwd)
-    writeIdentity(cwd, 'claude-code', 'claude-sonnet-4-6')
 
     const stdin = JSON.stringify({ tool_input: { file_path: `${cwd}/src/lib/hooks.ts` } })
-    const result = spawnSync(TSX, [CLI, 'hook', 'pre-edit', '--agent', 'claude-code', '--instance', '999'],
+    const result = spawnSync(TSX, [CLI, 'hook', 'pre-edit'],
       { input: stdin, encoding: 'utf-8', cwd, env: { ...process.env, NO_COLOR: '1' } })
 
     expect(result.status).toBe(2) // blocked
     expect(result.stderr).toContain('BLOCKED: No active work in pm.')
-    expect(result.stderr).toContain('--agent claude-code')
     expect(result.stderr).toContain('Update hooks')
   })
 

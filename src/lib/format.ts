@@ -35,8 +35,3 @@ export const PRIORITY_COLOR: Record<string, string> = {
   medium: 'white',
   low: 'gray',
 }
-
-/** Shorten a model ID for display: "claude-opus-4-6" → "opus-4-6", "gpt-4o" → "gpt-4o" */
-export function shortModel(model: string): string {
-  return model.replace(/^claude-/, '')
-}

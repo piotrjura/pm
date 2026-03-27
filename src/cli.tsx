@@ -24,6 +24,7 @@ import { cmdCleanup } from './commands/cleanup.js'
 import { cmdForget } from './commands/forget.js'
 import { cmdSettings } from './commands/settings.js'
 import { cmdBridge } from './commands/bridge.js'
+import { cmdSweep } from './commands/sweep.js'
 // decisions are always enabled — no config toggle needed
 
 const [,, subcommand, ...rest] = process.argv
@@ -36,11 +37,7 @@ async function launchTUI() {
 
 switch (subcommand) {
   case 'init':
-    await cmdInit(rest)
-    // After interactive init, launch the TUI if the wizard completed successfully
-    if (process.stdin.isTTY && process.exitCode !== 1) {
-      await launchTUI()
-    }
+    cmdInit(rest)
     break
   case 'next':
     cmdNext()
@@ -109,6 +106,9 @@ switch (subcommand) {
   case 'bridge':
     cmdBridge(rest)
     break
+  case 'sweep':
+    cmdSweep()
+    break
   case 'help':
   case '--help':
   case '-h':
@@ -118,8 +118,8 @@ Commands:
   pm              Open TUI
   pm init         Initialize pm in this directory
   pm next         Show next pending task
-  pm start <id>   Mark task as in-progress [--agent <name>] [--model <name>]
-  pm done <id>    Mark task as done [--agent <name>] [--model <name>] [--note "..."]
+  pm start <id>   Mark task/issue as in-progress
+  pm done <id>    Mark task/issue as done [--note "..."]
   pm list         List all features and tasks
   pm log [N]      Show last N log entries (default 20)
   pm error <id>          Mark task failed [--note "reason"]
@@ -130,16 +130,17 @@ Track work:
   pm add-feature <title> [--description "..."]
   pm add-phase <featureId> <title>
   pm add-task <featureId> <phaseId> <title> [--description "..."] [--files "a,b"] [--priority 1-5]
-  pm add-issue <title>   [--type bug|change] [--priority urgent|high|medium|low] [--description "..."] [--model <name>]
+  pm add-issue <title>   [--type bug|change] [--priority urgent|high|medium|low] [--description "..."]
   pm decide <id> "decision" [--reasoning "why"] [--action "do this"]
   pm why [search]        List all decisions, or search — find out why something was built a certain way
   pm forget "text"       Remove a decision (exact match or search)
-  pm settings            Configure features and agents
-  pm init --force        Overwrite hooks and plugins (auto-detects configured agents)
+  pm settings            Configure planning and questions settings
+  pm init --force        Overwrite hooks
   pm cleanup             Reset stuck tasks [--errors] [--drafts] [--all] [--quiet]
+  pm sweep               Close all outstanding items — run after work is done
   pm recap               Briefing: active work, recent decisions, next steps
   pm update <id>         Update issue/feature [--priority urgent|high|medium|low] [--title "..."] [--description "..."]
-  pm bridge <plan-file>  Import a superpowers plan into pm feature/phase/task structure
+  pm bridge <plan-file>  Import a plan into pm feature/phase/task structure
   pm show <id>           Feature or issue detail with decisions
 `)
     break

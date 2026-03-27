@@ -7,27 +7,9 @@ const PM_DIR = join(process.cwd(), '.pm')
 const DATA_FILE = join(PM_DIR, 'data.json')
 const PERM_RULE = 'Bash(pm *)'
 
-export interface ProjectStatus {
-  hasDataFile: boolean
-  projectDir: string
-}
-
-export interface AgentUpgrade {
-  name: string
-  result: 'updated' | 'exists'
-}
-
 export interface UpgradeInfo {
   fromVersion: string
   toVersion: string
-  agents: AgentUpgrade[]
-}
-
-export function detectProjectStatus(): ProjectStatus {
-  return {
-    hasDataFile: existsSync(DATA_FILE),
-    projectDir: process.cwd(),
-  }
 }
 
 export function isInitialized(): boolean {

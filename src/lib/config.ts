@@ -8,7 +8,7 @@ const PLANNING_VALUES: PlanningLevel[] = ['none', 'medium', 'all']
 const QUESTIONS_VALUES: QuestionsLevel[] = ['none', 'medium', 'thorough']
 
 export function defaultConfig(): Config {
-  return { planning: 'medium', questions: 'medium', agents: ['claude-code'] }
+  return { planning: 'medium', questions: 'medium' }
 }
 
 /** Load config from .pm/config.json, merging with defaults for missing keys. */
@@ -34,7 +34,6 @@ export function loadConfig(cwd = process.cwd()): Config {
     return {
       planning,
       questions,
-      agents: Array.isArray(raw.agents) ? raw.agents : defaults.agents,
     }
   } catch {
     return defaults

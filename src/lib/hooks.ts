@@ -5,7 +5,6 @@ import { loadConfig } from './config.js'
 
 const PM_DATA = (cwd: string) => join(cwd, '.pm', 'data.json')
 const SESSION_FILE = (cwd: string) => join(cwd, '.pm', 'session.json')
-const IDENTITY_FILE = (cwd: string) => join(cwd, '.pm', 'identity.json')
 
 // Scope warning thresholds
 export const SCOPE_WARN_FILES = 4 // warn when this many unique files edited under one task
@@ -46,10 +45,8 @@ interface ClaudeSettings {
   [key: string]: unknown
 }
 
-/** Check if pm has any active work (in-progress task or non-done issue).
- *  When `agent` is provided, only considers work owned by that agent or unowned work.
- *  When `instance` is also provided, narrows to that specific instance. */
-export function hasActiveWork(cwd: string, agent?: string, instance?: string): { active: boolean; summary?: string } {
+/** Check if pm has any active work (in-progress task or non-done issue). */
+export function hasActiveWork(cwd: string): { active: boolean; summary?: string } {
   const dataPath = PM_DATA(cwd)
   if (!existsSync(dataPath)) return { active: true } // pm not initialized, don't block
 
@@ -64,7 +61,7 @@ export function hasActiveWork(cwd: string, agent?: string, instance?: string): {
   for (const feature of store.features) {
     for (const phase of feature.phases) {
       for (const task of phase.tasks) {
-        if (task.status === 'in-progress' && matchesIdentity(task, agent, instance)) {
+        if (task.status === 'in-progress') {
           return { active: true, summary: `task: ${task.title} (${feature.title})` }
         }
       }
@@ -73,7 +70,7 @@ export function hasActiveWork(cwd: string, agent?: string, instance?: string): {
 
   // Check for non-done issues (add-issue is the "log work" step)
   for (const issue of store.issues) {
-    if (issue.status !== 'done' && matchesIdentity(issue, agent, instance)) {
+    if (issue.status !== 'done') {
       return { active: true, summary: `issue: ${issue.title}` }
     }
   }
@@ -81,32 +78,17 @@ export function hasActiveWork(cwd: string, agent?: string, instance?: string): {
   return { active: false }
 }
 
-/** Check if a task/issue belongs to the given agent+instance.
- *  - No agent filter → matches all
- *  - Agent matches + no instance filter → matches
- *  - Agent matches + instance matches → matches
- *  - Unowned work (no agent on item) → matches any agent (backward compat) */
-function matchesIdentity(item: { agent?: string; instance?: string }, agent?: string, instance?: string): boolean {
-  if (!agent) return true                    // no filter
-  if (!item.agent) return true               // unowned work — any agent can claim
-  if (item.agent !== agent) return false      // different agent — reject
-  if (!instance) return true                 // same agent, no instance filter
-  if (!item.instance) return true            // same agent, item has no instance — allow
-  return item.instance === instance          // same agent, match instance
-}
-
-/** Get the current active task/issue ID, or null.
- *  When `agent`/`instance` are provided, only considers matching work. */
-function getActiveId(store: DataStore, agent?: string, instance?: string): { id: string; type: 'task' | 'issue' } | null {
+/** Get the current active task/issue ID, or null. */
+function getActiveId(store: DataStore): { id: string; type: 'task' | 'issue' } | null {
   for (const feature of store.features) {
     for (const phase of feature.phases) {
       for (const task of phase.tasks) {
-        if (task.status === 'in-progress' && matchesIdentity(task, agent, instance)) return { id: task.id, type: 'task' }
+        if (task.status === 'in-progress') return { id: task.id, type: 'task' }
       }
     }
   }
   for (const issue of store.issues) {
-    if (issue.status !== 'done' && matchesIdentity(issue, agent, instance)) return { id: issue.id, type: 'issue' }
+    if (issue.status !== 'done') return { id: issue.id, type: 'issue' }
   }
   return null
 }
@@ -183,12 +165,6 @@ export function findRelevantDecisions(
   return matches.sort((a, b) => b.score - a.score).slice(0, maxResults)
 }
 
-interface AgentIdentity {
-  agent?: string
-  model?: string
-  instance?: string
-}
-
 /** Return the pm command string appropriate for the current context.
  *  Plugin mode → bundled CLI via absolute path. Global install → bare `pm`. */
 export function getPmCmd(): string {
@@ -196,24 +172,6 @@ export function getPmCmd(): string {
     return `node "${process.env.CLAUDE_PLUGIN_ROOT}/dist/cli.js"`
   }
   return 'pm'
-}
-
-/** Save the agent identity for the current session so prompt-context can reference it. */
-export function saveIdentity(cwd: string, identity: AgentIdentity): void {
-  const pmDir = join(cwd, '.pm')
-  if (!existsSync(pmDir)) mkdirSync(pmDir, { recursive: true })
-  writeFileSync(IDENTITY_FILE(cwd), JSON.stringify(identity, null, 2))
-}
-
-/** Load the persisted agent identity. */
-function loadIdentity(cwd: string): AgentIdentity | null {
-  const path = IDENTITY_FILE(cwd)
-  if (!existsSync(path)) return null
-  try {
-    return JSON.parse(readFileSync(path, 'utf-8'))
-  } catch {
-    return null
-  }
 }
 
 /** Generic filenames that need their parent dir for context. */
@@ -254,21 +212,6 @@ export function inferTitle(filePath: string | undefined): string | undefined {
   }
 
   return `Update ${stem}`
-}
-
-/** Build identity flag string (e.g. "--agent claude-code --model 'claude-opus-4-6[1m]'")
- *  from the persisted identity file. Returns empty string if no identity saved. */
-export function loadIdentityFlags(cwd: string): string {
-  const identity = loadIdentity(cwd)
-  if (!identity) return ''
-  const parts: string[] = []
-  if (identity.agent) parts.push(`--agent ${identity.agent}`)
-  if (identity.model) {
-    // Quote model values containing brackets (shell special chars)
-    const model = identity.model.includes('[') ? `'${identity.model}'` : identity.model
-    parts.push(`--model ${model}`)
-  }
-  return parts.join(' ')
 }
 
 /** Strip git worktree path prefixes from a relativized file path.
@@ -328,9 +271,8 @@ export function recordEdit(cwd: string, filePath: string): EditSession {
 }
 
 /** Get scope-aware status summary for prompt context injection.
- *  When `agent`/`instance` are provided, only shows matching work.
  *  When `prompt` is provided, searches all decisions for relevance. */
-export function getStatusSummary(cwd: string, agent?: string, instance?: string, prompt?: string): string {
+export function getStatusSummary(cwd: string, prompt?: string): string {
   const dataPath = PM_DATA(cwd)
   if (!existsSync(dataPath)) return ''
 
@@ -341,17 +283,10 @@ export function getStatusSummary(cwd: string, agent?: string, instance?: string,
     return ''
   }
 
-  const active = getActiveId(store, agent, instance)
+  const active = getActiveId(store)
   const session = loadSession(cwd)
   const allDecisions = collectAllDecisions(store)
   const config = loadConfig(cwd)
-
-  // Build identity flags string from persisted identity (saved at SessionStart)
-  const identity = loadIdentity(cwd)
-  const idFlags: string[] = []
-  if (identity?.agent) idFlags.push(`--agent ${identity.agent}`)
-  if (identity?.model) idFlags.push(`--model ${identity.model}`)
-  const idSuffix = idFlags.length > 0 ? ' ' + idFlags.join(' ') : ''
 
   // === No active work — tell Claude to assess scope and log work itself ===
   if (!active) {
@@ -362,9 +297,8 @@ export function getStatusSummary(cwd: string, agent?: string, instance?: string,
       // Slim output — skill has the full playbook
       const parts = [`[pm] No active work tracked. You MUST log work in pm before editing any code.
 
-  Quick fix: ${pmCmd} add-issue "description"${idSuffix}
-  Structured: ${pmCmd} add-feature "title" → ${pmCmd} add-phase → ${pmCmd} add-task → ${pmCmd} start${idSuffix}
-${idSuffix ? `\n  Always pass ${idSuffix.trim()} on every pm command.` : ''}
+  Quick fix: ${pmCmd} add-issue "description"
+  Structured: ${pmCmd} add-feature "title" → ${pmCmd} add-phase → ${pmCmd} add-task → ${pmCmd} start
   Use the pm-workflow skill for full command reference and scope rules.
   Workflow settings: planning=${config.planning}, questions=${config.questions}`]
 
@@ -386,12 +320,12 @@ ${idSuffix ? `\n  Always pass ${idSuffix.trim()} on every pm command.` : ''}
     const parts = [`[pm] No active work tracked. You MUST log work in pm before editing any code. Assess the scope of the user's request and run the appropriate commands yourself:
 
   Quick one-off fix (1-2 files, small change):
-    Run: ${pmCmd} add-issue "description"${idSuffix}
+    Run: ${pmCmd} add-issue "description"
 
   Structured work (3+ files, multiple logical steps):
     Run: ${pmCmd} add-feature "title" --description "..."
-    Then: ${pmCmd} add-phase, ${pmCmd} add-task, ${pmCmd} start <taskId>${idSuffix}
-${idSuffix ? `\n  IMPORTANT: Always pass ${idSuffix.trim()} on every pm command (add-issue, add-feature, start, done, decide, etc.) to record who did the work.` : ''}
+    Then: ${pmCmd} add-phase, ${pmCmd} add-task, ${pmCmd} start <taskId>
+
   Scope rules:
   - Each task = focused unit, 1-3 files, one logical change
   - 4+ files = feature with multiple tasks, not a single issue
@@ -422,7 +356,7 @@ ${idSuffix ? `\n  IMPORTANT: Always pass ${idSuffix.trim()} on every pm command 
   for (const feature of store.features) {
     for (const phase of feature.phases) {
       for (const task of phase.tasks) {
-        if (task.status === 'in-progress' && matchesIdentity(task, agent, instance)) {
+        if (task.status === 'in-progress') {
           const featureProgress = feature.phases.reduce(
             (acc, p) => {
               const done = p.tasks.filter(t => t.status === 'done').length
@@ -430,8 +364,7 @@ ${idSuffix ? `\n  IMPORTANT: Always pass ${idSuffix.trim()} on every pm command 
             },
             { done: 0, total: 0 },
           )
-          const agentLabel = task.agent ? ` [${task.agent}]` : ''
-          lines.push(`  Task: "${task.title}" (${feature.title} > ${phase.title})${agentLabel}`)
+          lines.push(`  Task: "${task.title}" (${feature.title} > ${phase.title})`)
           lines.push(`  Progress: ${featureProgress.done}/${featureProgress.total} tasks done`)
 
           // Collect decisions from this task and its parent feature
@@ -442,9 +375,8 @@ ${idSuffix ? `\n  IMPORTANT: Always pass ${idSuffix.trim()} on every pm command 
     }
   }
   for (const issue of store.issues) {
-    if (issue.status !== 'done' && matchesIdentity(issue, agent, instance)) {
-      const issueAgent = issue.agent ? ` [${issue.agent}]` : ''
-      lines.push(`  Issue: "${issue.title}" [${issue.priority}]${issueAgent}`)
+    if (issue.status !== 'done') {
+      lines.push(`  Issue: "${issue.title}" [${issue.priority}]`)
       if (issue.decisions?.length) taskDecisions.push(...issue.decisions)
     }
   }
@@ -474,12 +406,6 @@ ${idSuffix ? `\n  IMPORTANT: Always pass ${idSuffix.trim()} on every pm command 
       if (d.action) lines.push(`    → ${d.action}`)
       if (d.source) lines.push(`    [from ${d.source}]`)
     }
-  }
-
-  // Identity reminder
-  if (idSuffix) {
-    lines.push('')
-    lines.push(`  Identity: always pass ${idSuffix.trim()} on pm commands (done, decide, add-issue, start, etc.)`)
   }
 
   // Scope tracking
@@ -525,25 +451,25 @@ export function ensureHooks(cwd: string, force = false): 'added' | 'updated' | '
     PreToolUse: [
       {
         matcher: 'Edit|Write',
-        hooks: [{ type: 'command', command: 'pm hook pre-edit --agent claude-code --instance $PPID', timeout: 5 }],
+        hooks: [{ type: 'command', command: 'pm hook pre-edit', timeout: 5 }],
       },
     ],
     PostToolUse: [
       {
         matcher: 'Edit|Write',
-        hooks: [{ type: 'command', command: 'pm hook post-edit --agent claude-code --instance $PPID', timeout: 5 }],
+        hooks: [{ type: 'command', command: 'pm hook post-edit', timeout: 5 }],
       },
     ],
     UserPromptSubmit: [
       {
         matcher: '',
-        hooks: [{ type: 'command', command: 'pm hook prompt-context --agent claude-code --instance $PPID', timeout: 5 }],
+        hooks: [{ type: 'command', command: 'pm hook prompt-context', timeout: 5 }],
       },
     ],
     SessionStart: [
       {
         matcher: '',
-        hooks: [{ type: 'command', command: 'pm hook session-start --agent claude-code --instance $PPID', timeout: 10 }],
+        hooks: [{ type: 'command', command: 'pm hook session-start', timeout: 10 }],
       },
     ],
   }

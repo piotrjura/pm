@@ -1,6 +1,5 @@
 import { loadConfig, saveConfig } from '../lib/config.js'
 import { ensureHooks } from '../lib/hooks.js'
-import { ensureOpenCodePlugin } from '../lib/opencode.js'
 import { ensureClaudePermission } from '../lib/init.js'
 
 export async function cmdSettings() {
@@ -18,14 +17,8 @@ export async function cmdSettings() {
     onSave: (config) => {
       const cwd = process.cwd()
       saveConfig(config, cwd)
-      // If an agent was toggled ON, run its setup
-      if (config.agents.includes('claude-code')) {
-        ensureClaudePermission()
-        ensureHooks(cwd)
-      }
-      if (config.agents.includes('opencode')) {
-        ensureOpenCodePlugin(cwd)
-      }
+      ensureClaudePermission()
+      ensureHooks(cwd)
     },
   }))
   await waitUntilExit()
