@@ -1,8 +1,7 @@
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { execSync } from 'node:child_process'
-import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { hasActiveWork, getStatusSummary, recordEdit, inferTitle, getPmCmd } from '../lib/hooks.js'
+import { hasActiveWork, getStatusSummary, recordEdit, recordRead, inferTitle, getPmCmd, checkScopeEscalation, checkUpgradeEnforcement, resetDoctrineSession, requiredDoctrines, hasPulledDoctrine } from '../lib/hooks.js'
+import { readDoctrine } from './doctrine.js'
 
 /**
  * Handle Claude Code hook callbacks.
@@ -21,6 +20,9 @@ export function cmdHook(args: string[]) {
     case 'post-edit':
       handlePostEdit(cwd)
       break
+    case 'pre-read':
+      handlePreRead(cwd)
+      break
     case 'prompt-context':
       handlePromptContext(cwd)
       break
@@ -29,7 +31,7 @@ export function cmdHook(args: string[]) {
       break
     default:
       console.error(`Unknown hook: ${subcommand}`)
-      console.error('Available: pre-edit, post-edit, prompt-context, session-start')
+      console.error('Available: pre-edit, post-edit, pre-read, prompt-context, session-start')
       process.exit(1)
   }
 }
@@ -65,6 +67,32 @@ function handlePreEdit(cwd: string) {
 
   const { active } = hasActiveWork(cwd)
   if (active) {
+    // Check if an issue has grown beyond scope thresholds — hard block
+    const escalation = checkScopeEscalation(cwd)
+    if (escalation?.level === 'block') {
+      process.stderr.write(escalation.message)
+      process.exit(2)
+    }
+    // Check if an upgraded feature has enough tasks — hard block
+    const upgradeCheck = checkUpgradeEnforcement(cwd)
+    if (upgradeCheck) {
+      process.stderr.write(upgradeCheck.message)
+      process.exit(2)
+    }
+    // Doctrine enforcement — hard block when settings-gated doctrines weren't pulled
+    const required = requiredDoctrines(cwd)
+    const missing = required.filter(d => !hasPulledDoctrine(cwd, d))
+    if (missing.length > 0) {
+      const pmCmd = getPmCmd()
+      process.stderr.write(
+        `BLOCKED: Required doctrines not pulled this session.\n\n` +
+        `Your settings require these doctrines to be read before any code edit:\n` +
+        missing.map(d => `  ${pmCmd} doctrine ${d}`).join('\n') + `\n\n` +
+        `Run all of the above, then retry your edit.\n` +
+        `(Settings live at .pm/config.json — adjust with: ${pmCmd} settings)`,
+      )
+      process.exit(2)
+    }
     process.exit(0) // allow
   }
 
@@ -90,6 +118,27 @@ function handlePreEdit(cwd: string) {
     `Then retry your edit.`
   )
   process.exit(2) // block
+}
+
+/** PreToolUse hook for Read/Grep — count exploration ops to drive subagent nudges. */
+function handlePreRead(cwd: string) {
+  const input = readStdin()
+
+  try {
+    const data = JSON.parse(input)
+    const toolName: string = data?.tool_name ?? ''
+
+    // Only track Read and Grep — anything else is a no-op
+    if (toolName === 'Read') {
+      recordRead(cwd, 'Read')
+    } else if (toolName === 'Grep') {
+      recordRead(cwd, 'Grep')
+    }
+  } catch {
+    // Can't parse, skip silently
+  }
+
+  process.exit(0)
 }
 
 /** PostToolUse hook — track files edited per task. */
@@ -134,17 +183,21 @@ function handlePromptContext(cwd: string) {
   process.exit(0)
 }
 
-/** SessionStart hook — reset stuck tasks, brief on prior work. */
+/** SessionStart hook — reset stuck tasks, brief on prior work, inject router doctrine. */
 function handleSessionStart(cwd: string) {
   const contextParts: string[] = []
 
-  // 1. Inject pm-workflow skill content
-  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT
-    || join(dirname(fileURLToPath(import.meta.url)), '..')
-  const skillPath = join(pluginRoot, 'skills', 'pm-workflow', 'SKILL.md')
-  if (existsSync(skillPath)) {
-    const skillContent = readFileSync(skillPath, 'utf-8')
-    contextParts.push(skillContent)
+  // 0. Reset the doctrine pull tracker — every fresh Claude session starts with router only
+  try {
+    resetDoctrineSession(cwd)
+  } catch {
+    // Non-pm directory or fs error, skip silently
+  }
+
+  // 1. Inject the router doctrine — small, always-on, points Claude at pm doctrine <name> for depth
+  const router = readDoctrine('router')
+  if (router) {
+    contextParts.push(router)
   }
 
   // 2. Session briefing (cleanup + recap)
@@ -158,16 +211,6 @@ function handleSessionStart(cwd: string) {
     }
   } catch {
     // pm not available or no data, skip
-  }
-
-  // 3. When running as plugin, tell the agent the exact pm command to use
-  if (process.env.CLAUDE_PLUGIN_ROOT) {
-    contextParts.push(`**pm command:** Run all pm commands as: \`${pmBin}\`\nExample: \`${pmBin} add-issue "description"\``)
-    try {
-      execSync('command -v pm', { encoding: 'utf-8', timeout: 2000 })
-    } catch {
-      contextParts.push('Note: For the full TUI experience, install globally: npm install -g @piotrjura/pm')
-    }
   }
 
   // Output as additionalContext JSON

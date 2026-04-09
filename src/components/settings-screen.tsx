@@ -1,10 +1,11 @@
 import React, { useState } from 'react'
 import { Box, Text, useInput, useApp } from 'ink'
 import { loadConfig } from '../lib/config.js'
-import type { Config, PlanningLevel, QuestionsLevel } from '../lib/types.js'
+import type { Config, PlanningLevel, QuestionsLevel, FollowupLevel } from '../lib/types.js'
 
 const PLANNING_VALUES: PlanningLevel[] = ['none', 'medium', 'all']
 const QUESTIONS_VALUES: QuestionsLevel[] = ['none', 'medium', 'thorough']
+const FOLLOWUP_VALUES: FollowupLevel[] = ['none', 'medium', 'thorough']
 
 interface SettingsItem {
   key: string
@@ -15,6 +16,7 @@ interface SettingsItem {
 const ITEMS: SettingsItem[] = [
   { key: 'planning', label: 'Planning depth', values: PLANNING_VALUES },
   { key: 'questions', label: 'Questions', values: QUESTIONS_VALUES },
+  { key: 'followup', label: 'Follow-up discovery', values: FOLLOWUP_VALUES },
 ]
 
 function cycleValue(values: string[], current: string): string {
@@ -25,6 +27,7 @@ function cycleValue(values: string[], current: string): string {
 function getDisplayValue(item: SettingsItem, config: Config): string {
   if (item.key === 'planning') return config.planning
   if (item.key === 'questions') return config.questions
+  if (item.key === 'followup') return config.followup
   return ''
 }
 
@@ -62,6 +65,9 @@ export function SettingsScreen({ onSave, onDone, inline }: SettingsScreenProps) 
         if (item.key === 'questions') {
           return { ...prev, questions: cycleValue(QUESTIONS_VALUES, prev.questions) as QuestionsLevel }
         }
+        if (item.key === 'followup') {
+          return { ...prev, followup: cycleValue(FOLLOWUP_VALUES, prev.followup) as FollowupLevel }
+        }
         return prev
       })
     } else if (key.leftArrow) {
@@ -76,6 +82,11 @@ export function SettingsScreen({ onSave, onDone, inline }: SettingsScreenProps) 
           const idx = QUESTIONS_VALUES.indexOf(prev.questions)
           const newIdx = (idx - 1 + QUESTIONS_VALUES.length) % QUESTIONS_VALUES.length
           return { ...prev, questions: QUESTIONS_VALUES[newIdx] }
+        }
+        if (item.key === 'followup') {
+          const idx = FOLLOWUP_VALUES.indexOf(prev.followup)
+          const newIdx = (idx - 1 + FOLLOWUP_VALUES.length) % FOLLOWUP_VALUES.length
+          return { ...prev, followup: FOLLOWUP_VALUES[newIdx] }
         }
         return prev
       })

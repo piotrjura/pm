@@ -4,10 +4,13 @@ import { hasFlag } from '../lib/args.js'
 export function cmdCleanup(args: string[]) {
   const doErrors = hasFlag(args, '--errors') || hasFlag(args, '--all')
   const doDrafts = hasFlag(args, '--drafts') || hasFlag(args, '--all')
+  const force = hasFlag(args, '--force') || hasFlag(args, '--all')
   const quiet = hasFlag(args, '--quiet')
 
-  // Always reset stuck in-progress tasks
-  const stuck = resetStuckTasks()
+  // Reset stale in-progress tasks. By default only resets tasks that are
+  // genuinely stuck (>30min idle). --force / --all bypasses the staleness
+  // check for explicit user-driven recovery.
+  const stuck = resetStuckTasks(force ? { staleAfterMs: 0 } : {})
 
   // Optionally reset error tasks
   const errors = doErrors ? resetErrorTasks() : { tasksReset: [], featuresReverted: [] }

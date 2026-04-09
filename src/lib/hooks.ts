@@ -5,9 +5,13 @@ import { loadConfig } from './config.js'
 
 const PM_DATA = (cwd: string) => join(cwd, '.pm', 'data.json')
 const SESSION_FILE = (cwd: string) => join(cwd, '.pm', 'session.json')
+const DOCTRINE_SESSION_FILE = (cwd: string) => join(cwd, '.pm', 'doctrine-session.json')
 
-// Scope warning thresholds
+// Scope thresholds
 export const SCOPE_WARN_FILES = 4 // warn when this many unique files edited under one task
+export const SCOPE_NUDGE_EDITS = 3 // nudge after this many edits on an issue
+export const SCOPE_BLOCK_FILES = 4 // hard block issue at this many files
+export const SCOPE_BLOCK_EDITS = 10 // hard block issue at this many edits
 
 // Words to ignore when matching prompt text against decisions
 const STOP_WORDS = new Set([
@@ -32,7 +36,14 @@ interface EditSession {
   files: string[]
   /** Total edit operations */
   editCount: number
+  /** Total Read tool calls */
+  readCount?: number
+  /** Total Grep tool calls (each weighted as 2 reads in nudge math) */
+  grepCount?: number
 }
+
+/** Subagent nudge fires when readCount + 2*grepCount reaches this threshold. */
+export const SUBAGENT_NUDGE_THRESHOLD = 3
 
 interface HookConfig {
   matcher: string
@@ -165,12 +176,8 @@ export function findRelevantDecisions(
   return matches.sort((a, b) => b.score - a.score).slice(0, maxResults)
 }
 
-/** Return the pm command string appropriate for the current context.
- *  Plugin mode → bundled CLI via absolute path. Global install → bare `pm`. */
+/** Return the pm command string. CLI is the only install path. */
 export function getPmCmd(): string {
-  if (process.env.CLAUDE_PLUGIN_ROOT) {
-    return `node "${process.env.CLAUDE_PLUGIN_ROOT}/dist/cli.js"`
-  }
   return 'pm'
 }
 
@@ -228,6 +235,223 @@ export function stripWorktreePath(relPath: string): string {
   return result
 }
 
+/** Minimum number of non-done tasks required on an upgraded feature before edits are allowed. */
+export const UPGRADE_MIN_TASKS = 2
+
+export type EscalationLevel = 'none' | 'nudge' | 'block'
+
+export interface ScopeEscalation {
+  level: EscalationLevel
+  issueId: string
+  issueTitle: string
+  files: number
+  edits: number
+  message: string
+}
+
+export interface UpgradeEnforcement {
+  featureId: string
+  featureTitle: string
+  pendingTasks: number
+  required: number
+  message: string
+}
+
+/** Check if an active issue has exceeded scope thresholds.
+ *  Returns escalation info, or null if no issue is active or no threshold hit. */
+export function checkScopeEscalation(cwd: string): ScopeEscalation | null {
+  const dataPath = PM_DATA(cwd)
+  if (!existsSync(dataPath)) return null
+
+  let store: DataStore
+  try {
+    store = JSON.parse(readFileSync(dataPath, 'utf-8'))
+  } catch {
+    return null
+  }
+
+  const active = getActiveId(store)
+  if (!active || active.type !== 'issue') return null
+
+  const session = loadSession(cwd)
+  if (!session || session.activeId !== active.id) return null
+
+  const issue = store.issues.find(i => i.id === active.id)
+  if (!issue) return null
+
+  const pmCmd = getPmCmd()
+  const files = session.files.length
+  const edits = session.editCount
+
+  // Hard block: too many files or edits for an issue
+  if (files >= SCOPE_BLOCK_FILES || edits >= SCOPE_BLOCK_EDITS) {
+    return {
+      level: 'block',
+      issueId: active.id,
+      issueTitle: issue.title,
+      files,
+      edits,
+      message:
+        `BLOCKED: This issue has grown to ${files} file(s) and ${edits} edit(s) — too large for an issue.\n\n` +
+        `Run: ${pmCmd} upgrade ${active.id}\n\n` +
+        `This converts the issue to a feature with a retroactive task for work already done.\n` +
+        `You MUST then add at least ${UPGRADE_MIN_TASKS} tasks for the remaining work — edits will be blocked until you do.\n` +
+        `  ${pmCmd} add-task <featureId> <phaseId> "First remaining task"\n` +
+        `  ${pmCmd} add-task <featureId> <phaseId> "Second remaining task"\n` +
+        `  ${pmCmd} start <taskId>`,
+    }
+  }
+
+  // Nudge: edits are accumulating, scope might grow
+  if (edits >= SCOPE_NUDGE_EDITS) {
+    return {
+      level: 'nudge',
+      issueId: active.id,
+      issueTitle: issue.title,
+      files,
+      edits,
+      message:
+        `⚠ Scope check: ${edits} edits across ${files} file(s) on issue "${issue.title}". ` +
+        `If this is growing beyond a quick fix, upgrade to a feature with multiple tasks:\n` +
+        `  ${pmCmd} upgrade ${active.id}`,
+    }
+  }
+
+  return null
+}
+
+/** Check if an upgraded feature has enough tasks before allowing edits.
+ *  Upgraded features must have at least UPGRADE_MIN_TASKS non-done tasks.
+ *  Returns enforcement info, or null if not applicable or requirement is met. */
+export function checkUpgradeEnforcement(cwd: string): UpgradeEnforcement | null {
+  const dataPath = PM_DATA(cwd)
+  if (!existsSync(dataPath)) return null
+
+  let store: DataStore
+  try {
+    store = JSON.parse(readFileSync(dataPath, 'utf-8'))
+  } catch {
+    return null
+  }
+
+  // Find the active task's parent feature
+  for (const feature of store.features) {
+    if (!feature.upgradedFrom) continue // only check upgraded features
+
+    const hasActiveTask = feature.phases.some(p =>
+      p.tasks.some(t => t.status === 'in-progress')
+    )
+    if (!hasActiveTask) continue
+
+    // Count non-done tasks (pending + in-progress + error + review)
+    let nonDoneTasks = 0
+    for (const phase of feature.phases) {
+      for (const task of phase.tasks) {
+        if (task.status !== 'done') nonDoneTasks++
+      }
+    }
+
+    if (nonDoneTasks < UPGRADE_MIN_TASKS) {
+      const pmCmd = getPmCmd()
+      const phaseId = feature.phases[0]?.id
+      const need = UPGRADE_MIN_TASKS - nonDoneTasks
+      return {
+        featureId: feature.id,
+        featureTitle: feature.title,
+        pendingTasks: nonDoneTasks,
+        required: UPGRADE_MIN_TASKS,
+        message:
+          `BLOCKED: Feature "${feature.title}" was upgraded from an issue but only has ${nonDoneTasks} task(s).\n\n` +
+          `Upgraded features require at least ${UPGRADE_MIN_TASKS} tasks (not counting completed retroactive work).\n` +
+          `Add ${need} more task${need === 1 ? '' : 's'} to break down the remaining work:\n` +
+          (phaseId
+            ? `  ${pmCmd} add-task ${feature.id} ${phaseId} "Task description"\n`
+            : `  ${pmCmd} add-phase ${feature.id} "Phase title"\n  ${pmCmd} add-task ${feature.id} <phaseId> "Task description"\n`),
+      }
+    }
+  }
+
+  return null
+}
+
+/** Per-Claude-Code-session record of which doctrines have been pulled.
+ *  Resets on the SessionStart hook so a fresh Claude session forces re-pulling. */
+interface DoctrineSession {
+  /** Unique id (timestamp) for this Claude Code session */
+  sessionId: string
+  /** Names of doctrines that have been read this session */
+  pulled: string[]
+}
+
+/** Load the doctrine pull tracker, or null if not yet initialized. */
+export function loadDoctrineSession(cwd: string): DoctrineSession | null {
+  const path = DOCTRINE_SESSION_FILE(cwd)
+  if (!existsSync(path)) return null
+  try {
+    return JSON.parse(readFileSync(path, 'utf-8'))
+  } catch {
+    return null
+  }
+}
+
+/** Reset the doctrine pull tracker — called by the SessionStart hook.
+ *  Pre-populates 'router' since session-start always injects it. */
+export function resetDoctrineSession(cwd: string): DoctrineSession {
+  const session: DoctrineSession = {
+    sessionId: String(Date.now()),
+    pulled: ['router'],
+  }
+  const pmDir = join(cwd, '.pm')
+  if (!existsSync(pmDir)) mkdirSync(pmDir, { recursive: true })
+  writeFileSync(DOCTRINE_SESSION_FILE(cwd), JSON.stringify(session, null, 2))
+  return session
+}
+
+/** Record that Claude pulled a doctrine via `pm doctrine <name>`.
+ *  Idempotent — duplicate pulls are no-ops. Silent — never prints. */
+export function recordDoctrinePull(cwd: string, name: string): void {
+  const pmDir = join(cwd, '.pm')
+  if (!existsSync(pmDir)) return // pm not initialized, skip
+  let session = loadDoctrineSession(cwd)
+  if (!session) {
+    // Lazy init — first pull in a session that hasn't seen session-start yet
+    session = { sessionId: String(Date.now()), pulled: ['router'] }
+  }
+  if (!session.pulled.includes(name)) {
+    session.pulled.push(name)
+    writeFileSync(DOCTRINE_SESSION_FILE(cwd), JSON.stringify(session, null, 2))
+  }
+}
+
+/** Has the named doctrine been pulled in the current session? */
+export function hasPulledDoctrine(cwd: string, name: string): boolean {
+  const session = loadDoctrineSession(cwd)
+  if (!session) return false
+  return session.pulled.includes(name)
+}
+
+/** Names of doctrines that are required for edits given the current settings.
+ *  Settings-gated: planning, questions, followup at their strongest level.
+ *  Always-on: decisions. */
+export function requiredDoctrines(cwd: string): string[] {
+  const config = loadConfig(cwd)
+  const required: string[] = ['decisions'] // always-on
+  if (config.planning === 'all') required.push('planning')
+  if (config.questions === 'thorough') required.push('questions')
+  if (config.followup === 'thorough') required.push('followup')
+  return required
+}
+
+/** Doctrines that should be pulled at non-strongest settings (soft nudge only). */
+export function nudgeDoctrines(cwd: string): string[] {
+  const config = loadConfig(cwd)
+  const nudge: string[] = []
+  if (config.planning === 'medium') nudge.push('planning')
+  if (config.questions === 'medium') nudge.push('questions')
+  if (config.followup === 'medium') nudge.push('followup')
+  return nudge
+}
+
 /** Load the edit session tracker. */
 export function loadSession(cwd: string): EditSession | null {
   const path = SESSION_FILE(cwd)
@@ -237,6 +461,36 @@ export function loadSession(cwd: string): EditSession | null {
   } catch {
     return null
   }
+}
+
+/** Record a Read or Grep call in the session tracker. Resets if the active task changed.
+ *  Read increments readCount; Grep increments grepCount (weighted x2 in the nudge math). */
+export function recordRead(cwd: string, kind: 'Read' | 'Grep'): EditSession {
+  const dataPath = PM_DATA(cwd)
+  let activeId = ''
+  if (existsSync(dataPath)) {
+    try {
+      const store: DataStore = JSON.parse(readFileSync(dataPath, 'utf-8'))
+      const active = getActiveId(store)
+      if (active) activeId = active.id
+    } catch {}
+  }
+
+  let session = loadSession(cwd)
+
+  // Reset if active task changed
+  if (!session || session.activeId !== activeId) {
+    session = { activeId, files: [], editCount: 0, readCount: 0, grepCount: 0 }
+  }
+
+  if (kind === 'Read') {
+    session.readCount = (session.readCount ?? 0) + 1
+  } else {
+    session.grepCount = (session.grepCount ?? 0) + 1
+  }
+
+  writeFileSync(SESSION_FILE(cwd), JSON.stringify(session, null, 2))
+  return session
 }
 
 /** Record a file edit in the session tracker. Resets if the active task changed. */
@@ -270,6 +524,37 @@ export function recordEdit(cwd: string, filePath: string): EditSession {
   return session
 }
 
+/** Build doctrine-pull nudge lines for prompt-context injection.
+ *  Splits unpulled doctrines into BLOCKING (settings at strongest) and ADVISORY (medium settings). */
+function buildDoctrineNudges(cwd: string): string[] {
+  const lines: string[] = []
+  const required = requiredDoctrines(cwd)
+  const advisory = nudgeDoctrines(cwd)
+  const pmCmd = getPmCmd()
+
+  const missingRequired = required.filter(d => !hasPulledDoctrine(cwd, d))
+  const missingAdvisory = advisory.filter(d => !hasPulledDoctrine(cwd, d))
+
+  if (missingRequired.length > 0) {
+    lines.push('')
+    lines.push(`  ⚠ BLOCKING — these doctrines are required at your current settings but have NOT been pulled this session:`)
+    for (const name of missingRequired) {
+      lines.push(`    ${pmCmd} doctrine ${name}`)
+    }
+    lines.push(`  Edits will be hard-blocked until you pull them. Run all of the above before continuing.`)
+  }
+
+  if (missingAdvisory.length > 0) {
+    lines.push('')
+    lines.push(`  💡 Advisory — these doctrines match your current settings (medium) and should be pulled:`)
+    for (const name of missingAdvisory) {
+      lines.push(`    ${pmCmd} doctrine ${name}`)
+    }
+  }
+
+  return lines
+}
+
 /** Get scope-aware status summary for prompt context injection.
  *  When `prompt` is provided, searches all decisions for relevance. */
 export function getStatusSummary(cwd: string, prompt?: string): string {
@@ -290,33 +575,8 @@ export function getStatusSummary(cwd: string, prompt?: string): string {
 
   // === No active work — tell Claude to assess scope and log work itself ===
   if (!active) {
-    const isPlugin = !!process.env.CLAUDE_PLUGIN_ROOT
     const pmCmd = getPmCmd()
 
-    if (isPlugin) {
-      // Slim output — skill has the full playbook
-      const parts = [`[pm] No active work tracked. You MUST log work in pm before editing any code.
-
-  Quick fix: ${pmCmd} add-issue "description"
-  Structured: ${pmCmd} add-feature "title" → ${pmCmd} add-phase → ${pmCmd} add-task → ${pmCmd} start
-  Use the pm-workflow skill for full command reference and scope rules.
-  Workflow settings: planning=${config.planning}, questions=${config.questions}`]
-
-      const relevantPlugin = findRelevantDecisions(prompt ?? '', allDecisions)
-      if (relevantPlugin.length > 0) {
-        parts.push('')
-        parts.push('  ⚠ DECISIONS — you MUST follow these unless the user explicitly overrides:')
-        for (const d of relevantPlugin) {
-          parts.push(`  - "${d.decision}"${d.reasoning ? ` (${d.reasoning})` : ''}`)
-          if (d.action) parts.push(`    → ${d.action}`)
-          parts.push(`    [from ${d.source}]`)
-        }
-      }
-
-      return parts.join('\n')
-    }
-
-    // Full output for non-plugin users (no skill available)
     const parts = [`[pm] No active work tracked. You MUST log work in pm before editing any code. Assess the scope of the user's request and run the appropriate commands yourself:
 
   Quick one-off fix (1-2 files, small change):
@@ -331,7 +591,7 @@ export function getStatusSummary(cwd: string, prompt?: string): string {
   - 4+ files = feature with multiple tasks, not a single issue
   - Distinct stages (design, implement, test) = separate phases
   - When in doubt, start with add-issue — upgrade later if scope grows
-  Workflow: planning=${config.planning}, questions=${config.questions}`]
+  Workflow: planning=${config.planning}, questions=${config.questions}, followup=${config.followup}`]
 
     // Surface relevant decisions from past work (always on)
     const relevantFull = findRelevantDecisions(prompt ?? '', allDecisions)
@@ -345,12 +605,18 @@ export function getStatusSummary(cwd: string, prompt?: string): string {
       }
     }
 
+    // Surface doctrine pull status — applies in both no-active and active branches
+    parts.push(...buildDoctrineNudges(cwd))
+
     return parts.join('\n')
   }
 
   // === Active work — show status + scope tracking ===
   const lines: string[] = []
   const taskDecisions: Array<{ decision: string; reasoning?: string }> = []
+
+  // Workflow settings — surface on every prompt so Claude can't drift from configured depth
+  lines.push(`  Workflow: planning=${config.planning}, questions=${config.questions}, followup=${config.followup}`)
 
   // Current work
   for (const feature of store.features) {
@@ -408,15 +674,50 @@ export function getStatusSummary(cwd: string, prompt?: string): string {
     }
   }
 
-  // Scope tracking
-  if (session && session.activeId === active.id && session.files.length > 0) {
-    lines.push(`  Files edited: ${session.files.length} (${session.editCount} operations)`)
+  // Scope tracking + escalation for issues
+  if (session && session.activeId === active.id) {
+    if (session.files.length > 0) {
+      lines.push(`  Files edited: ${session.files.length} (${session.editCount} operations)`)
 
-    if (session.files.length >= SCOPE_WARN_FILES) {
+      const escalation = checkScopeEscalation(cwd)
+      if (escalation) {
+        lines.push('')
+        lines.push(`  ${escalation.message}`)
+      } else if (active.type === 'task' && session.files.length >= SCOPE_WARN_FILES) {
+        lines.push('')
+        lines.push(`  ⚠ Scope note: ${session.files.length} files edited (guideline: ${SCOPE_WARN_FILES - 1}). Consider splitting into smaller tasks next time.`)
+      }
+
+      // Decision nudge — if work is underway but no decisions recorded on current item
+      if (session.editCount >= SCOPE_NUDGE_EDITS && taskDecisions.length === 0) {
+        const pmCmd = getPmCmd()
+        lines.push('')
+        lines.push(`  💡 No decisions recorded yet. If you made any choices (approach, tradeoffs, what NOT to do), record them:`)
+        lines.push(`    ${pmCmd} decide ${active.id} "What you decided" --reasoning "Why"`)
+      }
+    }
+
+    // Subagent nudge — exploration adds up; delegate to keep Opus context lean.
+    // Read counts as 1, Grep counts as 2 (broader op, signals exploration intent).
+    const reads = session.readCount ?? 0
+    const greps = session.grepCount ?? 0
+    const score = reads + 2 * greps
+    if (score >= SUBAGENT_NUDGE_THRESHOLD) {
+      const pmCmd = getPmCmd()
       lines.push('')
-      lines.push(`  ⚠ Scope note: ${session.files.length} files edited (guideline: ${SCOPE_WARN_FILES - 1}). Consider splitting into smaller tasks next time.`)
+      lines.push(`  💡 Subagents: ${reads} read${reads === 1 ? '' : 's'} + ${greps} grep${greps === 1 ? '' : 's'} this task. For further exploration, delegate to the Explore agent (Haiku/Sonnet — saves Opus tokens, keeps context lean). Pull rules: ${pmCmd} doctrine subagents`)
     }
   }
+
+  // Upgrade enforcement — surface in prompt context so agent sees it before trying to edit
+  const upgradeCheck = checkUpgradeEnforcement(cwd)
+  if (upgradeCheck) {
+    lines.push('')
+    lines.push(`  ${upgradeCheck.message}`)
+  }
+
+  // Doctrine pull nudges — required (blocking) and advisory
+  lines.push(...buildDoctrineNudges(cwd))
 
   return `[pm] Active work:\n${lines.join('\n')}`
 }
@@ -452,6 +753,10 @@ export function ensureHooks(cwd: string, force = false): 'added' | 'updated' | '
       {
         matcher: 'Edit|Write',
         hooks: [{ type: 'command', command: 'pm hook pre-edit', timeout: 5 }],
+      },
+      {
+        matcher: 'Read|Grep',
+        hooks: [{ type: 'command', command: 'pm hook pre-read', timeout: 5 }],
       },
     ],
     PostToolUse: [

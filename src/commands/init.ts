@@ -17,10 +17,11 @@ export function cmdInit(args: string[] = []) {
   const hookResult = ensureHooks(cwd, force)
 
   // Config
-  const existingConfig = force ? loadConfig(cwd) : { planning: 'medium' as const, questions: 'medium' as const }
+  const existingConfig = force ? loadConfig(cwd) : { planning: 'medium' as const, questions: 'medium' as const, followup: 'medium' as const }
   const config: Config = {
     planning: existingConfig.planning ?? 'medium',
     questions: existingConfig.questions ?? 'medium',
+    followup: existingConfig.followup ?? 'medium',
   }
   saveConfig(config, cwd)
 
@@ -29,7 +30,7 @@ export function cmdInit(args: string[] = []) {
   console.log('Setup:')
   console.log(`  \u2713 .pm/data.json       ${force ? 'ok' : 'created'}`)
   console.log(`  \u2713 claude-code         ${permResult === 'added' ? 'permissions added' : 'permissions ok'}, hooks ${hookResult}`)
-  console.log(`  \u2713 config              planning=${config.planning}, questions=${config.questions}`)
+  console.log(`  \u2713 config              planning=${config.planning}, questions=${config.questions}, followup=${config.followup}`)
 
   if (!force) {
     console.log()

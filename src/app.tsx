@@ -8,6 +8,7 @@ import { IssueDetail } from './components/issue-detail.js'
 import { DecisionsList } from './components/decisions-list.js'
 import { SettingsScreen } from './components/settings-screen.js'
 import { UpgradeScreen } from './components/upgrade-screen.js'
+import { InitConfirmScreen } from './components/init-confirm-screen.js'
 import { useNavigation } from './hooks/use-navigation.js'
 import { useStore } from './hooks/use-store.js'
 import { isInitialized, ensureClaudePermission, detectUpgrade } from './lib/init.js'
@@ -23,7 +24,41 @@ function setTerminalTitle(title: string) {
 
 const projectName = path.basename(process.cwd())
 
+/**
+ * Top-level App component. Handles the first-run init gate, then mounts
+ * <MainApp /> only after the user has confirmed initialization. This split
+ * matters because useStore() in MainApp eagerly calls loadStore() — which
+ * would create .pm/data.json before the user has consented.
+ */
 export function App() {
+  const { exit } = useApp()
+  const [initialized, setInitialized] = useState(() => isInitialized())
+
+  const handleInitConfirm = useCallback(() => {
+    const cwd = process.cwd()
+    loadStore()
+    ensureClaudePermission()
+    ensureHooks(cwd)
+    setInitialized(true)
+  }, [])
+
+  if (!initialized) {
+    return (
+      <InitConfirmScreen
+        onConfirm={handleInitConfirm}
+        onCancel={() => exit()}
+      />
+    )
+  }
+
+  return <MainApp />
+}
+
+/**
+ * Main pm TUI. Mounted only after init is confirmed. All store-touching
+ * hooks live here so they never run before .pm/data.json exists.
+ */
+function MainApp() {
   const { exit } = useApp()
   const { stdout } = useStdout()
   const [dims, setDims] = useState({ rows: stdout?.rows ?? 24, cols: stdout?.columns ?? 80 })
@@ -36,16 +71,6 @@ export function App() {
     return () => { stdout.off('resize', onResize) }
   }, [stdout])
 
-  const [initialized] = useState(() => {
-    if (!isInitialized()) {
-      // Auto-init: create data store and set up hooks silently
-      const cwd = process.cwd()
-      loadStore()
-      ensureClaudePermission()
-      ensureHooks(cwd)
-    }
-    return true
-  })
   const [config, setConfig] = useState(() => loadConfig())
   const [upgradeInfo, setUpgradeInfo] = useState<UpgradeInfo | null>(() => {
     const upgrade = detectUpgrade()
@@ -76,7 +101,6 @@ export function App() {
 
   // Update terminal tab title based on current view
   useEffect(() => {
-    if (!initialized) return
     if (nav.screen.type === 'feature-detail') {
       const feature = store.store.features.find(f => f.id === (nav.screen as { featureId: string }).featureId)
       setTerminalTitle(`pm — ${projectName} — ${feature?.title ?? 'Feature'}`)
@@ -90,7 +114,7 @@ export function App() {
     } else {
       setTerminalTitle(`pm — ${projectName}`)
     }
-  }, [initialized, nav.screen, store.store.features, store.store.issues])
+  }, [nav.screen, store.store.features, store.store.issues])
 
   // Restore title on unmount
   useEffect(() => {
@@ -99,7 +123,6 @@ export function App() {
 
   // Collect all decisions from store for the decisions screen
   const allDecisions = useMemo<DecisionMatch[]>(() => {
-    // decisions are always collected
     const matches: DecisionMatch[] = []
     for (const feature of store.store.features) {
       for (const d of feature.decisions ?? []) {
@@ -123,7 +146,6 @@ export function App() {
   }, [store.store.features, store.store.issues])
 
   useInput((input, key) => {
-    if (!initialized) return
     // Don't handle global keys when on settings screen (it handles its own input)
     if (nav.screen.type === 'settings') return
     if (input === 'q') { exit(); return }

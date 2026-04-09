@@ -7,7 +7,7 @@ beforeEach(() => { cwd = createTestDir() })
 afterEach(() => { cleanupTestDir(cwd) })
 
 describe('pm cleanup', () => {
-  it('resets in-progress tasks to pending', () => {
+  it('--force resets in-progress tasks to pending regardless of staleness', () => {
     pm('init', cwd)
     const { taskId } = createFullFeature(cwd)
     pm(`start ${taskId}`, cwd)
@@ -17,14 +17,27 @@ describe('pm cleanup', () => {
     const task = data.features[0].phases[0].tasks[0]
     expect(task.status).toBe('in-progress')
 
-    const result = pm('cleanup', cwd)
+    const result = pm('cleanup --force', cwd)
     expect(result.stdout).toContain('Reset 1 stuck task')
 
     data = loadData(cwd)
     expect(data.features[0].phases[0].tasks[0].status).toBe('pending')
   })
 
-  it('reverts feature to planned when no done tasks', () => {
+  it('does NOT reset fresh in-progress tasks without --force', () => {
+    pm('init', cwd)
+    const { taskId } = createFullFeature(cwd)
+    pm(`start ${taskId}`, cwd)
+
+    // Default cleanup runs the staleness check; a just-started task is fresh
+    const result = pm('cleanup', cwd)
+    expect(result.stdout).toContain('Nothing to clean up')
+
+    const data = loadData(cwd)
+    expect(data.features[0].phases[0].tasks[0].status).toBe('in-progress')
+  })
+
+  it('--force reverts feature to planned when no done tasks', () => {
     pm('init', cwd)
     const { featureId, taskId } = createFullFeature(cwd)
     pm(`start ${taskId}`, cwd)
@@ -32,13 +45,13 @@ describe('pm cleanup', () => {
     let data = loadData(cwd)
     expect(data.features[0].status).toBe('in-progress')
 
-    pm('cleanup', cwd)
+    pm('cleanup --force', cwd)
 
     data = loadData(cwd)
     expect(data.features[0].status).toBe('planned')
   })
 
-  it('keeps feature in-progress when it has done tasks', () => {
+  it('--force keeps feature in-progress when it has done tasks', () => {
     pm('init', cwd)
     const { featureId, phaseId, taskId } = createFullFeature(cwd)
 
@@ -53,7 +66,7 @@ describe('pm cleanup', () => {
     let data = loadData(cwd)
     expect(data.features[0].status).toBe('in-progress')
 
-    pm('cleanup', cwd)
+    pm('cleanup --force', cwd)
 
     data = loadData(cwd)
     // Should stay in-progress because task2 is done
@@ -62,11 +75,11 @@ describe('pm cleanup', () => {
     expect(data.features[0].phases[0].tasks[1].status).toBe('done')
   })
 
-  it('logs reset entries', () => {
+  it('--force logs reset entries', () => {
     pm('init', cwd)
     const { taskId } = createFullFeature(cwd)
     pm(`start ${taskId}`, cwd)
-    pm('cleanup', cwd)
+    pm('cleanup --force', cwd)
 
     const data = loadData(cwd)
     const resetEntries = data.log.filter((e: { action: string }) => e.action === 'reset')
@@ -133,12 +146,12 @@ describe('pm cleanup', () => {
     expect(result.stdout).toContain('Nothing to clean up')
   })
 
-  it('--quiet outputs concise format for hooks', () => {
+  it('--force --quiet outputs concise format for hooks', () => {
     pm('init', cwd)
     const { taskId } = createFullFeature(cwd)
     pm(`start ${taskId}`, cwd)
 
-    const result = pm('cleanup --quiet', cwd)
+    const result = pm('cleanup --force --quiet', cwd)
     expect(result.stdout).toContain('[pm]')
     expect(result.stdout).toContain('Reset 1 stuck task')
   })

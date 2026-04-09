@@ -1,14 +1,15 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Config, PlanningLevel, QuestionsLevel } from './types.js'
+import type { Config, PlanningLevel, QuestionsLevel, FollowupLevel } from './types.js'
 
 const CONFIG_FILE = (cwd: string) => join(cwd, '.pm', 'config.json')
 
 const PLANNING_VALUES: PlanningLevel[] = ['none', 'medium', 'all']
 const QUESTIONS_VALUES: QuestionsLevel[] = ['none', 'medium', 'thorough']
+const FOLLOWUP_VALUES: FollowupLevel[] = ['none', 'medium', 'thorough']
 
 export function defaultConfig(): Config {
-  return { planning: 'medium', questions: 'medium' }
+  return { planning: 'medium', questions: 'medium', followup: 'medium' }
 }
 
 /** Load config from .pm/config.json, merging with defaults for missing keys. */
@@ -30,10 +31,12 @@ export function loadConfig(cwd = process.cwd()): Config {
     // Migrate: old configs had `decisions: boolean` — drop it silently
     const planning = PLANNING_VALUES.includes(raw.planning) ? raw.planning : defaults.planning
     const questions = QUESTIONS_VALUES.includes(raw.questions) ? raw.questions : defaults.questions
+    const followup = FOLLOWUP_VALUES.includes(raw.followup) ? raw.followup : defaults.followup
 
     return {
       planning,
       questions,
+      followup,
     }
   } catch {
     return defaults

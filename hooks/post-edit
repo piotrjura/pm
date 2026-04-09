@@ -1,2 +1,0 @@
-#!/bin/bash
-node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" hook post-edit "$@"

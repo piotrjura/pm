@@ -47,6 +47,8 @@ export interface Feature {
   decisions?: Decision[]
   /** Path to superpowers plan file this feature was imported from */
   planSource?: string
+  /** If this feature was upgraded from an issue, the original issue ID */
+  upgradedFrom?: string
   createdAt: string
   updatedAt: string
   doneAt?: string
@@ -89,10 +91,12 @@ export interface DataStore {
 
 export type PlanningLevel = 'none' | 'medium' | 'all'
 export type QuestionsLevel = 'none' | 'medium' | 'thorough'
+export type FollowupLevel = 'none' | 'medium' | 'thorough'
 
 export interface Config {
   planning: PlanningLevel
   questions: QuestionsLevel
+  followup: FollowupLevel
 }
 
 // The resolved "next task" returned by getNextTask()

@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -58,6 +58,20 @@ export function loadData(cwd: string) {
   return JSON.parse(raw)
 }
 
+
+/** Pre-pull all doctrines for a test directory so pre-edit hook doesn't block on
+ *  missing doctrines. Use in tests that exercise pre-edit at default settings. */
+export function seedAllDoctrines(cwd: string) {
+  const pmDir = join(cwd, '.pm')
+  if (!existsSync(pmDir)) mkdirSync(pmDir, { recursive: true })
+  writeFileSync(
+    join(pmDir, 'doctrine-session.json'),
+    JSON.stringify({
+      sessionId: 'test',
+      pulled: ['router', 'planning', 'questions', 'followup', 'decisions'],
+    }, null, 2),
+  )
+}
 
 /** Run a full feature workflow and return all the IDs */
 export function createFullFeature(cwd: string, title = 'Test-feature') {

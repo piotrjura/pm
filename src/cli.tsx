@@ -25,6 +25,11 @@ import { cmdForget } from './commands/forget.js'
 import { cmdSettings } from './commands/settings.js'
 import { cmdBridge } from './commands/bridge.js'
 import { cmdSweep } from './commands/sweep.js'
+import { cmdUpgrade } from './commands/upgrade.js'
+import { cmdDoctrine } from './commands/doctrine.js'
+import { ensureHooks } from './lib/hooks.js'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 // decisions are always enabled — no config toggle needed
 
 const [,, subcommand, ...rest] = process.argv
@@ -34,6 +39,30 @@ async function launchTUI() {
   await app.start()
   await app.waitUntilExit()
 }
+
+/**
+ * Self-heal Claude Code hooks on every pm invocation.
+ * If .pm/ exists (this is a pm project) and hooks are missing or out of date,
+ * silently re-install them. Print one line if anything changed.
+ *
+ * Skipped for `pm hook ...` (avoids recursion) and `pm init ...` (init handles
+ * hooks itself with full output).
+ */
+function selfHealHooks() {
+  if (subcommand === 'hook' || subcommand === 'init') return
+  const cwd = process.env.CLAUDE_PROJECT_DIR ?? process.cwd()
+  if (!existsSync(join(cwd, '.pm'))) return // not a pm project
+  try {
+    const result = ensureHooks(cwd)
+    if (result === 'added' || result === 'updated') {
+      console.error(`[pm] Self-healed Claude Code hooks (${result})`)
+    }
+  } catch {
+    // Silent — never break a command if hook write fails
+  }
+}
+
+selfHealHooks()
 
 switch (subcommand) {
   case 'init':
@@ -109,6 +138,12 @@ switch (subcommand) {
   case 'sweep':
     cmdSweep()
     break
+  case 'upgrade':
+    cmdUpgrade(rest)
+    break
+  case 'doctrine':
+    cmdDoctrine(rest)
+    break
   case 'help':
   case '--help':
   case '-h':
@@ -136,12 +171,14 @@ Track work:
   pm forget "text"       Remove a decision (exact match or search)
   pm settings            Configure planning and questions settings
   pm init --force        Overwrite hooks
-  pm cleanup             Reset stuck tasks [--errors] [--drafts] [--all] [--quiet]
+  pm upgrade <issueId>   Convert issue to feature (preserves decisions)
+  pm cleanup             Reset stale stuck tasks [--errors] [--drafts] [--force] [--all] [--quiet]
   pm sweep               Close all outstanding items — run after work is done
   pm recap               Briefing: active work, recent decisions, next steps
   pm update <id>         Update issue/feature [--priority urgent|high|medium|low] [--title "..."] [--description "..."]
   pm bridge <plan-file>  Import a plan into pm feature/phase/task structure
   pm show <id>           Feature or issue detail with decisions
+  pm doctrine [name]     List doctrines, or print one (try: pm doctrine router)
 `)
     break
   default:

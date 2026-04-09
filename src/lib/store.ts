@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { nanoid } from 'nanoid'
 import type { DataStore, Feature, Phase, Issue, Task, LogEntry, NextTask, Decision } from './types.js'
@@ -7,13 +7,51 @@ import { loadConfig } from './config.js'
 
 const PM_DIR = join(process.cwd(), '.pm')
 const DATA_FILE = join(PM_DIR, 'data.json')
+const SESSION_FILE = join(PM_DIR, 'session.json')
+
+/** Default staleness threshold for stuck-task detection: 30 minutes.
+ *  Tasks started within this window — or whose session.json was touched within
+ *  this window — are considered actively in progress, not stuck. */
+export const STUCK_STALE_MS = 30 * 60 * 1000
+
+/** Read the active task id from .pm/session.json without parsing files/editCount.
+ *  Returns null on missing/corrupt file. */
+function readSessionInfo(): { activeId: string; mtimeMs: number } | null {
+  if (!existsSync(SESSION_FILE)) return null
+  try {
+    const raw = JSON.parse(readFileSync(SESSION_FILE, 'utf-8'))
+    const stat = statSync(SESSION_FILE)
+    return { activeId: raw?.activeId ?? '', mtimeMs: stat.mtimeMs }
+  } catch {
+    return null
+  }
+}
+
+/** Decide whether an in-progress task should be reset as "stuck".
+ *  Fresh tasks (recently started OR with recent edit activity matching this task)
+ *  are NOT stuck — only abandoned tasks from prior sessions are. */
+function isTaskStuck(task: Task, now: number, staleAfterMs: number): boolean {
+  // Recently started? Not stuck.
+  if (task.startedAt) {
+    const startedMs = new Date(task.startedAt).getTime()
+    if (!Number.isNaN(startedMs) && now - startedMs < staleAfterMs) {
+      return false
+    }
+  }
+  // Session.json activeId matches AND was touched recently? Not stuck.
+  const session = readSessionInfo()
+  if (session && session.activeId === task.id && now - session.mtimeMs < staleAfterMs) {
+    return false
+  }
+  return true
+}
 
 
 function ensureDir() {
   if (!existsSync(PM_DIR)) {
     mkdirSync(PM_DIR, { recursive: true })
   }
-  // Lazy-create config.json with defaults if missing (for plugin users who skip pm init)
+  // Lazy-create config.json with defaults if missing
   loadConfig()
 }
 
@@ -586,35 +624,67 @@ export interface ActionItems {
   openIssues: Array<{ issueId: string; issueTitle: string; priority: string }>
 }
 
-/** Reset all in-progress tasks to pending. Returns what was reset. */
-export function resetStuckTasks(): ResetResult {
+/**
+ * Reset stale in-progress tasks to pending.
+ *
+ * A task is considered "stuck" only if BOTH of these are true:
+ *   - It was started more than `staleAfterMs` ago (or has no startedAt at all)
+ *   - The .pm/session.json edit-tracker either doesn't reference this task, or
+ *     was last touched more than `staleAfterMs` ago
+ *
+ * Tasks that fail either check are NOT reset — they're still being actively
+ * worked on. This prevents SessionStart cleanup from blowing away healthy
+ * in-progress work just because a new Claude session started.
+ *
+ * Pass `staleAfterMs: 0` to force-reset everything regardless of staleness
+ * (useful for explicit user-driven recovery).
+ */
+export function resetStuckTasks(opts: { staleAfterMs?: number } = {}): ResetResult {
+  const staleAfterMs = opts.staleAfterMs ?? STUCK_STALE_MS
+  const now = Date.now()
   const store = loadStore()
   const tasksReset: ResetResult['tasksReset'] = []
   const featuresReverted: ResetResult['featuresReverted'] = []
+  const resetTaskIds = new Set<string>()
 
   for (const feature of store.features) {
     if (feature.status === 'done') continue
 
-    let hadInProgress = false
+    let hadReset = false
     for (const phase of feature.phases) {
       for (const task of phase.tasks) {
-        if (task.status === 'in-progress') {
-          hadInProgress = true
-          task.status = 'pending'
-          task.startedAt = undefined
-          tasksReset.push({ taskId: task.id, taskTitle: task.title, featureTitle: feature.title })
-        }
+        if (task.status !== 'in-progress') continue
+        if (staleAfterMs > 0 && !isTaskStuck(task, now, staleAfterMs)) continue
+        task.status = 'pending'
+        task.startedAt = undefined
+        tasksReset.push({ taskId: task.id, taskTitle: task.title, featureTitle: feature.title })
+        resetTaskIds.add(task.id)
+        hadReset = true
       }
     }
 
     // Fix feature status if needed
-    if (hadInProgress) {
+    if (hadReset) {
       const hasDone = feature.phases.some(p => p.tasks.some(t => t.status === 'done'))
       const hasInProgress = feature.phases.some(p => p.tasks.some(t => t.status === 'in-progress'))
       if (!hasInProgress && !hasDone) {
         feature.status = 'planned'
         featuresReverted.push({ featureId: feature.id, featureTitle: feature.title })
       }
+    }
+  }
+
+  // If we reset the task that .pm/session.json was tracking, wipe it so
+  // scope counters don't carry over to the next task.
+  if (resetTaskIds.size > 0 && existsSync(SESSION_FILE)) {
+    try {
+      const session = JSON.parse(readFileSync(SESSION_FILE, 'utf-8'))
+      if (session?.activeId && resetTaskIds.has(session.activeId)) {
+        unlinkSync(SESSION_FILE)
+      }
+    } catch {
+      // Corrupt session file — safe to delete
+      try { unlinkSync(SESSION_FILE) } catch {}
     }
   }
 
@@ -890,6 +960,74 @@ export function addDecision(id: string, decision: string, reasoning?: string, ac
   }
 
   return null
+}
+
+/** Session data passed to upgrade so it can create a retroactive task. */
+export interface UpgradeSession {
+  files: string[]
+  editCount: number
+}
+
+/** Upgrade an issue to a feature. Preserves title, description, decisions.
+ *  Removes the issue from the store and creates a new feature with an initial phase.
+ *  When session data is provided, creates a retroactive "done" task for work already completed.
+ *  Returns the new feature, or null if the issue wasn't found. */
+export function upgradeIssueToFeature(issueId: string, session?: UpgradeSession): Feature | null {
+  const store = loadStore()
+  const idx = store.issues.findIndex(i => i.id === issueId)
+  if (idx === -1) return null
+
+  const issue = store.issues[idx]
+  const now = new Date().toISOString()
+
+  // Build initial phase with retroactive task if session data exists
+  const phases: Phase[] = []
+  if (session && session.files.length > 0) {
+    const retroTask: Task = {
+      id: nanoid(8),
+      title: `Initial changes (${session.files.length} file${session.files.length === 1 ? '' : 's'}, ${session.editCount} edit${session.editCount === 1 ? '' : 's'})`,
+      files: [...session.files],
+      status: 'done',
+      note: 'Retroactive: work done before upgrade',
+      startedAt: issue.createdAt,
+      doneAt: now,
+    }
+    phases.push({
+      id: nanoid(8),
+      title: 'Implementation',
+      tasks: [retroTask],
+    })
+  }
+
+  // Create feature from issue
+  const feature: Feature = {
+    id: nanoid(8),
+    type: issue.type === 'bug' ? 'fix' : 'feature',
+    title: issue.title,
+    description: issue.description,
+    status: phases.length > 0 ? 'planned' : 'draft',
+    phases,
+    decisions: issue.decisions,
+    upgradedFrom: issueId,
+    createdAt: issue.createdAt,
+    updatedAt: now,
+  }
+
+  // Remove the issue, add the feature
+  store.issues.splice(idx, 1)
+  store.features.push(feature)
+  saveStore(store)
+
+  appendLog({
+    featureId: feature.id,
+    featureTitle: feature.title,
+    issueId: issue.id,
+    issueTitle: issue.title,
+    action: 'started',
+    note: `upgraded from issue to feature`,
+  })
+
+  return feature
 }
 
 /** Remove a decision by matching its text. Searches all features, tasks, and issues.

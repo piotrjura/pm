@@ -36,8 +36,8 @@ export function FeatureDetail({ feature, height, width, focused, onBack }: Featu
 
   return (
     <Box flexDirection="column" paddingX={2} paddingY={1} height={height} overflow="hidden">
-      {/* Feature header */}
-      <Box marginBottom={1} gap={1}>
+      {/* Feature header — locked: never shrinks. */}
+      <Box marginBottom={1} gap={1} flexShrink={0}>
         <Box flexShrink={0}>
           <Text color={typeColor}>[{feature.type}]</Text>
         </Box>
@@ -52,26 +52,32 @@ export function FeatureDetail({ feature, height, width, focused, onBack }: Featu
       </Box>
 
       {feature.description && (
-        <Box flexDirection="column" marginBottom={1} paddingLeft={2}>
+        <Box flexDirection="column" marginBottom={1} paddingLeft={2} flexShrink={0}>
           {feature.description.split(/(?=\d+[\.\)]\s)/).map((chunk, i) => (
             <Text key={i} dimColor>{chunk.trim()}</Text>
           ))}
         </Box>
       )}
 
-      {/* Feature-level decisions */}
+      {/* Feature-level decisions — titles only; reasoning lives in the
+          dedicated decisions screen (press 'w' from the list).
+          flexShrink={0} keeps the list stable as cursor moves through tasks
+          (without it Ink trims/reorders items to fit available height). */}
       {feature.decisions && feature.decisions.length > 0 && (
-        <Box flexDirection="column" marginBottom={1}>
-          <Text bold color="magenta">  Decisions</Text>
+        <Box flexDirection="column" marginBottom={1} flexShrink={0}>
+          <Text bold color="magenta">  Decisions ({feature.decisions.length})</Text>
           {feature.decisions.map((d, i) => (
-            <Box key={i} paddingLeft={4} flexDirection="column" width={width ? width - 8 : undefined}>
-              <Text wrap="wrap">• {d.decision}</Text>
-              {d.reasoning && <Text dimColor wrap="wrap">  Why: {d.reasoning}</Text>}
+            <Box key={i} paddingLeft={4} width={width ? width - 8 : undefined} flexShrink={0}>
+              <Text wrap="truncate-end">• {d.decision}</Text>
             </Box>
           ))}
         </Box>
       )}
 
+      {/* Phases — the only flexible section. Absorbs remaining vertical
+          space and clips overflow internally so the locked sections above
+          stay intact. */}
+      <Box flexDirection="column" flexGrow={1} flexShrink={1} overflow="hidden">
       {feature.phases.length === 0 ? (
         <Text dimColor>No phases yet. Use: pm add-phase {feature.id} "Phase name"</Text>
       ) : (
@@ -120,10 +126,17 @@ export function FeatureDetail({ feature, height, width, focused, onBack }: Featu
                       )}
                     </Box>
 
-                    {/* Note row — shown always for done tasks, or when cursor is on it */}
-                    {task.note && (isCursor || isDoneTask) && (
+                    {/* Note row — shown only when cursor is on this task, to keep
+                        the feature view scannable. Done tasks with notes show a
+                        single-line preview when not cursored. */}
+                    {task.note && isCursor && (
                       <Box paddingLeft={3} width={width ? width - 11 : undefined}>
                         <Text dimColor wrap="wrap">↳ {task.note}</Text>
+                      </Box>
+                    )}
+                    {task.note && !isCursor && isDoneTask && (
+                      <Box paddingLeft={3} width={width ? width - 11 : undefined}>
+                        <Text dimColor wrap="truncate-end">↳ {task.note}</Text>
                       </Box>
                     )}
 
@@ -159,6 +172,7 @@ export function FeatureDetail({ feature, height, width, focused, onBack }: Featu
           )
         })
       )}
+      </Box>
     </Box>
   )
 }
