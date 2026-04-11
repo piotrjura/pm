@@ -692,7 +692,7 @@ export function getStatusSummary(cwd: string, prompt?: string): string {
       if (session.editCount >= SCOPE_NUDGE_EDITS && taskDecisions.length === 0) {
         const pmCmd = getPmCmd()
         lines.push('')
-        lines.push(`  💡 No decisions recorded yet. If you made any choices (approach, tradeoffs, what NOT to do), record them:`)
+        lines.push(`  💡 No decisions recorded. If this work set direction (approach picked over alternatives, rules, scope cuts), record it. Otherwise skip — quality over quantity:`)
         lines.push(`    ${pmCmd} decide ${active.id} "What you decided" --reasoning "Why"`)
       }
     }

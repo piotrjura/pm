@@ -16,3 +16,30 @@ function readVersion(): string {
 }
 
 export const PM_VERSION = readVersion()
+
+const REGISTRY_URL = 'https://registry.npmjs.org/@piotrjura/pm/latest'
+
+/** Fetch the latest published version from npm. Returns null on any failure. */
+export async function checkLatestVersion(): Promise<string | null> {
+  try {
+    const res = await fetch(REGISTRY_URL, {
+      headers: { accept: 'application/json' },
+      signal: AbortSignal.timeout(3000),
+    })
+    if (!res.ok) return null
+    const data = await res.json() as { version?: string }
+    return data.version ?? null
+  } catch {
+    return null
+  }
+}
+
+/** Compare two semver strings. Returns true if remote is strictly newer. */
+export function isNewer(current: string, remote: string): boolean {
+  const parse = (v: string) => v.split('.').map(Number)
+  const [cMaj, cMin, cPat] = parse(current)
+  const [rMaj, rMin, rPat] = parse(remote)
+  if (rMaj !== cMaj) return rMaj > cMaj
+  if (rMin !== cMin) return rMin > cMin
+  return rPat > cPat
+}

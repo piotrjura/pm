@@ -52,6 +52,8 @@ interface UnifiedListProps {
   initialCursor?: number
   initialPage?: number
   initialSearch?: string
+  version?: string
+  latestVersion?: string | null
 }
 
 export function UnifiedList({
@@ -69,6 +71,8 @@ export function UnifiedList({
   initialCursor = 0,
   initialPage = 0,
   initialSearch = '',
+  version,
+  latestVersion,
 }: UnifiedListProps) {
   const [cursor, setCursor] = useState(initialCursor)
   const [page, setPage] = useState(initialPage)
@@ -152,6 +156,8 @@ export function UnifiedList({
         {/* Header */}
         <Box marginBottom={1} gap={2}>
           <Text bold color="cyan">pm</Text>
+          {version && <Text dimColor>v{version}</Text>}
+          {latestVersion && <Text color="yellow">v{latestVersion} available</Text>}
           <Text dimColor>
             {activeCount > 0 ? <Text color="yellow">{activeCount} active  </Text> : ''}
             {doneCount}/{features.length} features

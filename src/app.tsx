@@ -17,6 +17,7 @@ import { loadStore, removeDecision } from './lib/store.js'
 import type { DecisionMatch } from './lib/store.js'
 import { ensureHooks, hasClaudeHooks } from './lib/hooks.js'
 import { loadConfig, saveConfig } from './lib/config.js'
+import { PM_VERSION, checkLatestVersion, isNewer } from './lib/version.js'
 
 function setTerminalTitle(title: string) {
   process.stdout.write(`\x1b]2;${title}\x07`)
@@ -87,6 +88,13 @@ function MainApp() {
     loadStore()
     return upgrade
   })
+
+  const [latestVersion, setLatestVersion] = useState<string | null>(null)
+  useEffect(() => {
+    checkLatestVersion().then(v => {
+      if (v && isNewer(PM_VERSION, v)) setLatestVersion(v)
+    })
+  }, [])
 
   const nav = useNavigation()
   const store = useStore()
@@ -185,6 +193,8 @@ function MainApp() {
             onDeleteFeature={(id) => store.removeFeature(id)}
             onAddIssue={(title) => store.createIssue(title)}
             onDeleteIssue={(id) => store.removeIssue(id)}
+            version={PM_VERSION}
+            latestVersion={latestVersion}
           />
         ) : nav.screen.type === 'feature-detail' ? (
           (() => {
